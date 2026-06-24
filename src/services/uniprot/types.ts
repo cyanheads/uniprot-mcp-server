@@ -85,6 +85,15 @@ export const MANDATORY_ENTRY_FIELDS = [
   'protein_existence',
 ] as const;
 
+/**
+ * UniProtKB primary accession pattern. Covers both the 6-character format
+ * (OPQ-prefix) and the 10-character format (1 or 2 alpha–digit–alpha3–digit
+ * groups), used by tools and resources to validate input before calling the
+ * service.
+ */
+export const ACCESSION_REGEX =
+  /^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})$/;
+
 /** Organism block shared across hits, entries, and proteomes. */
 export type Organism = {
   scientificName: string;

@@ -18,11 +18,8 @@ import {
   selectSections,
 } from '@cyanheads/mcp-ts-core/utils';
 import type { Entry } from '@/services/uniprot/types.js';
+import { ACCESSION_REGEX } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
-
-/** UniProtKB primary accession pattern (covers both accession formats). */
-const ACCESSION_REGEX =
-  /^(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9](?:[A-Z][A-Z0-9]{2}[0-9]){1,2})$/;
 
 const EvidencedTextSchema = z
   .object({
