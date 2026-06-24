@@ -113,6 +113,148 @@ describe('UniProtService — error classification', () => {
   });
 });
 
+describe('UniProtService — upstream-error leak prevention', () => {
+  // fetchWithTimeout attaches { statusCode, statusText, responseBody, requestId,
+  // operation, errorSource } to the status-mapped McpError it throws on any
+  // non-2xx / timeout / network failure. The handler boundary copies error.data
+  // verbatim onto structuredContent.error.data, so a raw framework error reaching
+  // the client leaks the raw upstream body and internal request metadata. The
+  // service must re-throw clean on EVERY failure path, not just 404.
+  //
+  // A representative framework error: the leaky data + the raw, status-and-URL
+  // bearing message exactly as fetchWithTimeout builds it.
+  const frameworkError = (code: JsonRpcErrorCode, status: number) =>
+    new McpError(
+      code,
+      `Fetch failed for https://rest.uniprot.org/uniprotkb/search. Status: ${status}`,
+      {
+        requestId: 'req-internal-abc123',
+        operation: 'uniprot.search',
+        statusCode: status,
+        statusText: 'Service Unavailable',
+        responseBody:
+          '<html><head><title>503</title></head><body>upstream gateway error: pod uniprot-7f9 unreachable</body></html>',
+        errorSource: 'FetchHttpError',
+      },
+    );
+
+  /** Assert a thrown error carries none of the raw upstream internals on its wire-facing surface. */
+  const assertLeakFree = (err: McpError) => {
+    expect(err).toBeInstanceOf(McpError);
+    // The data payload (copied verbatim to structuredContent.error.data) must not
+    // carry any framework HTTP internal.
+    const data = (err.data ?? {}) as Record<string, unknown>;
+    expect(data).not.toHaveProperty('responseBody');
+    expect(data).not.toHaveProperty('statusCode');
+    expect(data).not.toHaveProperty('statusText');
+    expect(data).not.toHaveProperty('requestId');
+    expect(data).not.toHaveProperty('operation');
+    expect(data).not.toHaveProperty('errorSource');
+    // The message must not echo the raw upstream body, internal request id, or the
+    // raw "Status: NNN / rest.uniprot.org" wording.
+    expect(err.message).not.toMatch(/responseBody|req-internal|uniprot-7f9|gateway error/);
+    expect(err.message).not.toMatch(/Status: \d{3}|rest\.uniprot\.org/);
+  };
+
+  it('search: a 503 ServiceUnavailable is re-thrown clean (no statusCode/responseBody/requestId)', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(
+      frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503),
+    );
+    const err = await service.search('gene:TP53', {}, ctx()).catch((e) => e as McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.ServiceUnavailable); // classification preserved
+    assertLeakFree(err);
+    // The original is retained as cause for server-side logs only (never serialized to the client).
+    expect((err as { cause?: unknown }).cause).toBeInstanceOf(McpError);
+  });
+
+  it('search: a 429 RateLimited is re-thrown clean', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(frameworkError(JsonRpcErrorCode.RateLimited, 429));
+    const err = await service.search('gene:TP53', {}, ctx()).catch((e) => e as McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.RateLimited);
+    assertLeakFree(err);
+  });
+
+  it('getEntries: a 500 InternalError is re-thrown clean', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(frameworkError(JsonRpcErrorCode.InternalError, 500));
+    const err = await service.getEntries(['P04637'], undefined, ctx()).catch((e) => e as McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.InternalError);
+    assertLeakFree(err);
+  });
+
+  it('getProteome: a 502 ServiceUnavailable is re-thrown clean', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(
+      frameworkError(JsonRpcErrorCode.ServiceUnavailable, 502),
+    );
+    const err = await service.getProteome({ taxonId: 9606 }, ctx()).catch((e) => e as McpError);
+    assertLeakFree(err);
+  });
+
+  it('getTaxonById: a non-404 (503) is re-thrown clean, not just 404', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(
+      frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503),
+    );
+    const err = await service.getTaxonById(9606, ctx()).catch((e) => e as McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
+    assertLeakFree(err);
+  });
+
+  it('getFasta: a non-404 (429) is re-thrown clean, not just 404', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(frameworkError(JsonRpcErrorCode.RateLimited, 429));
+    const err = await service.getFasta('P04637', false, ctx()).catch((e) => e as McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.RateLimited);
+    assertLeakFree(err);
+  });
+
+  it('mapIds (run submission): a 503 on the run POST is re-thrown clean', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(
+      frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503),
+    );
+    const err = await service
+      .mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx())
+      .catch((e) => e as McpError);
+    assertLeakFree(err);
+  });
+
+  it('mapIds (results poll): a 503 on the status endpoint is re-thrown clean', async () => {
+    fetchWithTimeoutMock
+      // POST /idmapping/run → ok
+      .mockResolvedValueOnce(jsonResponse({ jobId: 'job-1' }))
+      // GET /idmapping/status/job-1 → 503 framework error
+      .mockRejectedValueOnce(frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503));
+    const err = await service
+      .mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx())
+      .catch((e) => e as McpError);
+    assertLeakFree(err);
+  });
+
+  it('a timeout (no leaky data on the error) passes through untouched — code and message preserved', async () => {
+    // fetchWithTimeout's timeout() error carries { requestId, operation, errorSource } —
+    // still leaky (requestId/operation), so it must also be sanitized.
+    fetchWithTimeoutMock.mockRejectedValue(
+      new McpError(JsonRpcErrorCode.Timeout, 'fetch GET https://rest.uniprot.org/… timed out.', {
+        requestId: 'req-internal-xyz',
+        operation: 'uniprot.search',
+        errorSource: 'FetchTimeout',
+      }),
+    );
+    const err = await service.search('gene:TP53', {}, ctx()).catch((e) => e as McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.Timeout);
+    assertLeakFree(err);
+  });
+
+  it('a clean domain error (notFound with safe data) is NOT mangled by the sanitizer', async () => {
+    // The service's own notFound carries only { name } — no leaky keys — so it must
+    // pass through unchanged (message and safe data intact).
+    fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: [] }));
+    const err = await service
+      .getTaxonByName('Nonexistus organismus', ctx())
+      .catch((e) => e as McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+    expect(err.message).toBe('No taxonomy record matched the name "Nonexistus organismus".');
+    expect(err.data).toMatchObject({ name: 'Nonexistus organismus' });
+  });
+});
+
 describe('UniProtService — search parsing', () => {
   it('reads totalResults from x-total-results and the cursor from the Link header', async () => {
     fetchWithTimeoutMock.mockResolvedValue(

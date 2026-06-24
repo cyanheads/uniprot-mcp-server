@@ -53,6 +53,51 @@ import {
   MANDATORY_ENTRY_FIELDS,
 } from '@/services/uniprot/types.js';
 
+/**
+ * Framework `data` keys that carry raw upstream internals — `fetchWithTimeout`
+ * attaches these to the status-mapped `McpError` it throws on any non-2xx /
+ * timeout / network failure. The handler boundary copies `error.data` verbatim
+ * onto `structuredContent.error.data`, so any one of these on an error that
+ * reaches the client leaks internals (`responseBody` is up to 500 bytes of the
+ * raw upstream error page; the rest expose status, internal request id, and the
+ * internal operation label). Presence of any key flags a raw framework HTTP
+ * error that must be re-thrown clean before it escapes the service.
+ */
+const LEAKY_ERROR_DATA_KEYS = [
+  'responseBody',
+  'statusCode',
+  'requestId',
+  'operation',
+  'errorSource',
+  'statusText',
+] as const;
+
+/**
+ * Re-throw a raw framework HTTP `McpError` as a clean, typed domain error so
+ * upstream internals never reach the client. Detection is STRUCTURAL — any
+ * leaky `data` key (never a message substring) — preserving the framework's
+ * status-mapped code while dropping the leaky `data` and keeping the original
+ * as `cause` for server-side logs. Errors without leaky `data` (the service's
+ * own `notFound`/`serviceUnavailable`, a plain parse error, an abort) pass
+ * through untouched.
+ *
+ * `label` describes the operation for the clean message (e.g. "UniProtKB
+ * search"); the code already conveys the failure class (rate limit, upstream
+ * 5xx, timeout) to the agent.
+ */
+function sanitizeUpstreamError(err: unknown, label: string): never {
+  if (
+    err instanceof McpError &&
+    err.data &&
+    LEAKY_ERROR_DATA_KEYS.some((k) => k in (err.data as Record<string, unknown>))
+  ) {
+    throw new McpError(err.code, `${label} failed upstream (${err.code}).`, undefined, {
+      cause: err,
+    });
+  }
+  throw err;
+}
+
 /** Strip evidence-reference parentheticals (e.g. `(PubMed:12345)`) for a clean snippet. */
 function stripEvidence(text: string): string {
   return text
@@ -186,7 +231,7 @@ export class UniProtService {
       const text = await response.text();
       this.guardHtml(text);
       return { data: JSON.parse(text) as T, response };
-    });
+    }).catch((err) => sanitizeUpstreamError(err, operation));
   }
 
   /** Parse the opaque forward cursor out of the `Link: rel="next"` header. */
@@ -347,7 +392,7 @@ export class UniProtService {
       const text = await response.text();
       this.guardHtml(text);
       return { data: JSON.parse(text) as { jobId?: string; messages?: string[] } };
-    });
+    }).catch((err) => sanitizeUpstreamError(err, 'uniprot.runMapping'));
 
     if (!data.jobId) {
       throw serviceUnavailable(
@@ -537,7 +582,7 @@ export class UniProtService {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw notFound(`No sequence found for accession ${accession}.`, { accession });
       }
-      throw err;
+      return sanitizeUpstreamError(err, 'uniprot.getFasta');
     });
 
     const records = parseFasta(text);
