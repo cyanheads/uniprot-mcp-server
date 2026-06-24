@@ -1,6 +1,6 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "cyanheads/uniprot-mcp-server",
+  "name": "io.github.cyanheads/uniprot-mcp-server",
   "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
   "repository": {
     "url": "https://github.com/cyanheads/uniprot-mcp-server",

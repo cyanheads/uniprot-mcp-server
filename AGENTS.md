@@ -11,19 +11,6 @@
 
 ---
 
-## First Session
-
-This project was just scaffolded with `bunx @cyanheads/mcp-ts-core init`. You're holding a production-grade MCP framework with the hard parts already solved — error handling, telemetry, auth, transport, validation, lifecycle. What's missing is the **domain**. Your job: design the tool, resource, and service surface with the user, then implement it as small pure handlers that throw — the framework catches, classifies, and instruments the rest. Design before code; the user's first messages set direction, so wait for them before scaffolding definitions.
-
-> **Remove this section** from CLAUDE.md / AGENTS.md after completing these steps. The skills and conventions below remain — this block is one-time onboarding only.
-
-1. **Get your bearings.** Take stock of the project tree, the skills in `skills/`, and the tools/MCP servers available. Light tool use is fine for context-building — you're mapping the territory, not committing yet.
-2. **Read the framework docs** — `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` (builders, Context, errors, exports, conventions)
-3. **Run the `setup` skill** — read `skills/setup/SKILL.md` and follow its checklist (project orientation, agent protocol file selection, echo definition cleanup, skill sync)
-4. **Design the server** — read `skills/design-mcp-server/SKILL.md` and work through it with the user to map the domain into tools, resources, and services before scaffolding
-
----
-
 ## What's Next?
 
 When the user asks what's next or needs direction, suggest options based on the current project state. Common next steps:
@@ -58,72 +45,106 @@ Tailor suggestions to what's actually missing or stale — don't recite the full
 
 ### Tool
 
+Real example: `uniprot_get_sequence` (the cheap, sequence-only path). Pure handler that throws via a typed error contract; the framework catches and formats.
+
 ```ts
 import { tool, z } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import type { SequenceRecord } from '@/services/uniprot/types.js';
+import { ACCESSION_REGEX } from '@/services/uniprot/types.js';
+import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
-export const searchItems = tool('search_items', {
-  description: 'Search inventory items by query.',
-  annotations: { readOnlyHint: true },
+export const getSequence = tool('uniprot_get_sequence', {
+  title: 'uniprot-mcp-server: get sequence',
+  description: 'Fetch the canonical amino-acid sequence (FASTA) for a UniProtKB accession …',
+  annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
-    query: z.string().describe('Search terms'),
-    limit: z.number().default(10).describe('Max results'),
+    accession: z.string().regex(ACCESSION_REGEX).describe('UniProtKB primary accession, e.g. "P04637".'),
+    include_isoforms: z.boolean().default(false).describe('Also return isoform sequences. Default false.'),
   }),
   output: z.object({
-    items: z.array(z.object({
-      id: z.string().describe('Item ID'),
-      name: z.string().describe('Item name'),
-    })).describe('Matching items'),
+    accession: z.string().describe('The accession that was fetched.'),
+    canonical: z.object({ /* header, sequence, length */ }).describe('The canonical sequence record.'),
   }),
-  auth: ['inventory:read'],
+  errors: [
+    { reason: 'not_found', code: JsonRpcErrorCode.NotFound,
+      when: 'The accession has no sequence in UniProtKB.',
+      recovery: 'Verify the accession with uniprot_search_proteins or uniprot_map_ids, then retry.' },
+  ],
 
   async handler(input, ctx) {
-    const items = await findItems(input.query, input.limit);
-    ctx.log.info('Search completed', { query: input.query, count: items.length });
-    return { items };
+    let records: SequenceRecord[];
+    try {
+      records = await getUniProtService().getFasta(input.accession, input.include_isoforms, ctx);
+    } catch (err) {
+      // Translate the service's NotFound into the tool's typed contract reason.
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
+        throw ctx.fail('not_found', err.message, { ...ctx.recoveryFor('not_found') });
+      }
+      throw err;
+    }
+    ctx.log.info('Sequence fetched', { accession: input.accession });
+    return { /* normalized canonical + optional isoforms */ };
   },
 
   // format() populates content[] — the markdown twin of structuredContent.
   // Different clients read different surfaces (Claude Code → structuredContent,
   // Claude Desktop → content[]); both must carry the same data.
   // Enforced at lint time: every field in `output` must appear in the rendered text.
-  format: (result) => [{
-    type: 'text',
-    text: result.items.map(i => `**${i.id}**: ${i.name}`).join('\n'),
-  }],
+  format: (result) => [{ type: 'text', text: `# ${result.accession} …` }],
 });
 ```
 
 ### Resource
 
+Real example: `uniprot://taxonomy/{taxonId}` — the by-ID mirror of `uniprot_get_taxonomy`.
+
 ```ts
 import { resource, z } from '@cyanheads/mcp-ts-core';
-import { notFound } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
-export const itemData = resource('inventory://{itemId}', {
-  description: 'Fetch an inventory item by ID.',
-  params: z.object({ itemId: z.string().describe('Item identifier') }),
-  auth: ['inventory:read'],
+export const taxonomyResource = resource('uniprot://taxonomy/{taxonId}', {
+  name: 'UniProt taxonomy record',
+  description: 'A taxonomy record by NCBI taxon ID — name, rank, parent, full lineage.',
+  mimeType: 'application/json',
+  params: z.object({
+    taxonId: z.string().regex(/^[0-9]+$/).describe('NCBI taxonomy ID as a string, e.g. "9606".'),
+  }),
+  errors: [
+    { reason: 'not_found', code: JsonRpcErrorCode.NotFound,
+      when: 'The taxon ID did not resolve to a record.',
+      recovery: 'Check the NCBI taxon ID, or resolve a name with uniprot_get_taxonomy.' },
+  ],
   async handler(params, ctx) {
-    const item = await ctx.state.get(`item:${params.itemId}`);
-    if (!item) throw notFound(`Item ${params.itemId} not found`, { itemId: params.itemId });
-    return item;
+    try {
+      return await getUniProtService().getTaxonById(Number(params.taxonId), ctx);
+    } catch (err) {
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
+        throw ctx.fail('not_found', err.message, { taxonId: params.taxonId, ...ctx.recoveryFor('not_found') });
+      }
+      throw err;
+    }
   },
 });
 ```
 
 ### Prompt
 
+Real example: `uniprot_protein_dossier` — the guided protein-research workflow.
+
 ```ts
 import { prompt, z } from '@cyanheads/mcp-ts-core';
 
-export const reviewCode = prompt('review_code', {
-  description: 'Review code for issues and best practices.',
+export const proteinDossier = prompt('uniprot_protein_dossier', {
+  title: 'uniprot-mcp-server: protein dossier',
+  description: 'Guided protein-research workflow over UniProt — resolve an identifier, fetch the curated entry …',
   args: z.object({
-    code: z.string().describe('Code to review'),
-    language: z.string().optional().describe('Programming language'),
+    identifier: z.string().describe('A gene name, UniProtKB accession, or protein name to research.'),
+    organism: z.string().optional().describe('Optional organism name or NCBI taxon ID to disambiguate.'),
   }),
   generate: (args) => [
-    { role: 'user', content: { type: 'text', text: `Review this ${args.language ?? ''} code:\n${args.code}` } },
+    { role: 'user', content: { type: 'text', text: `Build a protein dossier for "${args.identifier}". …` } },
   ],
 });
 ```
@@ -131,28 +152,35 @@ export const reviewCode = prompt('review_code', {
 ### Server config
 
 ```ts
-// src/config/server-config.ts — lazy-parsed, separate from framework config
+// src/config/server-config.ts — lazy-parsed, separate from framework config.
+// UniProt REST is keyless: no API-key field, only optional overrides.
 import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
 const ServerConfigSchema = z.object({
-  apiKey: z.string().describe('External API key'),
-  maxResults: z.coerce.number().default(100),
-  verboseLogging: z.stringbool().default(false).describe('Enable verbose logging'),
+  baseUrl: z.string().url().default('https://rest.uniprot.org')
+    .describe('UniProt REST base URL. Override for a private mirror or testing.'),
+  timeoutMs: z.coerce.number().int().positive().default(30_000)
+    .describe('Per-request HTTP timeout in milliseconds.'),
+  idMappingBudgetMs: z.coerce.number().int().positive().default(8_000)
+    .describe('Wall-clock budget for the inline ID-mapping poll loop. Should be less than timeoutMs.'),
+  defaultPageSize: z.coerce.number().int().positive().max(500).default(25)
+    .describe('Default page size for search and proteome protein listing.'),
 });
 
 let _config: z.infer<typeof ServerConfigSchema> | undefined;
 export function getServerConfig() {
   _config ??= parseEnvConfig(ServerConfigSchema, {
-    apiKey: 'MY_API_KEY',
-    maxResults: 'MY_MAX_RESULTS',
-    verboseLogging: 'MY_VERBOSE_LOGGING',
+    baseUrl: 'UNIPROT_BASE_URL',
+    timeoutMs: 'UNIPROT_TIMEOUT_MS',
+    idMappingBudgetMs: 'UNIPROT_ID_MAPPING_BUDGET_MS',
+    defaultPageSize: 'UNIPROT_DEFAULT_PAGE_SIZE',
   });
   return _config;
 }
 ```
 
-`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`MY_API_KEY`) not the path (`apiKey`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
+`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`UNIPROT_BASE_URL`) not the path (`baseUrl`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
 
 For env booleans use `z.stringbool()`, never `z.coerce.boolean()` — `Boolean("false")` is `true`, so a coerced flag can't be disabled through the environment. `z.stringbool()` parses `true/false/1/0/yes/no/on/off` and rejects anything else, so `=false` actually disables.
 
@@ -177,17 +205,18 @@ await createApp({
 
 ## Context
 
-Handlers receive a unified `ctx` object. Key properties:
+Handlers receive a unified `ctx` object. The properties this server uses:
 
 | Property | Description |
 |:---------|:------------|
 | `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Auto-correlates requestId, traceId, tenantId. |
-| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`, `.list(prefix, { cursor, limit })`. Accepts any serializable value. |
-| `ctx.elicit` | Ask user for structured input — form call `(message, schema)` or `.url(message, url)` for an external link. **Check for presence first:** `if (ctx.elicit) { ... }` |
+| `ctx.enrich` | Attach agent-facing context to both `structuredContent` and `content[]` — `ctx.enrich({ field })` for `enrichment` fields, `.echo(query)`, `.notice(text)`, `.truncated({ shown, cap, guidance })`. Used by search / map_ids / proteome for totals, query echo, pagination notices. |
+| `ctx.fail` / `ctx.recoveryFor` | Throw a typed contract error (`ctx.fail('reason', msg, { ...ctx.recoveryFor('reason') })`); `reason` is checked against the tool's `errors[]` union. |
 | `ctx.signal` | `AbortSignal` for cancellation. |
-| `ctx.progress` | Task progress (present when `task: true`) — `.setTotal(n)`, `.increment()`, `.update(message)`. |
 | `ctx.requestId` | Unique request ID. |
 | `ctx.tenantId` | Tenant ID from JWT or `'default'` for stdio. |
+
+This server is stateless and keyless — no tool uses `ctx.state`, `ctx.elicit`, or `ctx.progress` (no `task: true` tools). See the framework `CLAUDE.md` / `api-context` skill for those.
 
 ---
 
@@ -239,20 +268,26 @@ See framework CLAUDE.md and the `api-errors` skill for the full auto-classificat
 
 ```text
 src/
-  index.ts                              # createApp() entry point
+  index.ts                              # createApp() entry point — registers the surface, inits UniProtService
   config/
-    server-config.ts                    # Server-specific env vars (Zod schema)
+    server-config.ts                    # UNIPROT_* env vars (Zod schema), lazy-parsed
   services/
-    [domain]/
-      [domain]-service.ts               # Domain service (init/accessor pattern)
-      types.ts                          # Domain types
+    uniprot/
+      uniprot-service.ts                # rest.uniprot.org REST client (init/accessor pattern)
+      types.ts                          # Normalized domain types + ID-mapping enums + accession regex
   mcp-server/
     tools/definitions/
-      [tool-name].tool.ts               # Tool definitions
+      uniprot-search-proteins.tool.ts   # Discovery search
+      uniprot-get-entry.tool.ts         # Batch curated entries (partial-success / outline)
+      uniprot-map-ids.tool.ts           # Async ID mapping (run → poll → resumable ticket)
+      uniprot-get-proteome.tool.ts      # Reference proteome by UPID / taxon
+      uniprot-get-taxonomy.tool.ts      # Taxonomy record by ID / name
+      uniprot-get-sequence.tool.ts      # Canonical + isoform FASTA
     resources/definitions/
-      [resource-name].resource.ts       # Resource definitions
+      uniprot-entry.resource.ts         # uniprot://entry/{accession}
+      uniprot-taxonomy.resource.ts      # uniprot://taxonomy/{taxonId}
     prompts/definitions/
-      [prompt-name].prompt.ts           # Prompt definitions
+      uniprot-protein-dossier.prompt.ts # Guided protein-research workflow
 ```
 
 ---
@@ -384,7 +419,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { McpError, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 // Server's own code — via path alias
-import { getMyService } from '@/services/my-domain/my-service.js';
+import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 ```
 
 ---
@@ -394,8 +429,8 @@ import { getMyService } from '@/services/my-domain/my-service.js';
 - [ ] Zod schemas: all fields have `.describe()`, only JSON-Schema-serializable types (no `z.custom()`, `z.date()`, `z.transform()`, `z.bigint()`, `z.symbol()`, `z.void()`, `z.map()`, `z.set()`, `z.function()`, `z.nan()`)
 - [ ] Optional nested objects: handler guards for empty inner values from form-based clients (`if (input.obj?.field && ...)`, not just `if (input.obj)`). When regex/length constraints matter, use `z.union([z.literal(''), z.string().regex(...).describe(...)])` — literal variants are exempt from `describe-on-fields`.
 - [ ] JSDoc `@fileoverview` + `@module` on every file
-- [ ] `ctx.log` for logging, `ctx.state` for storage
-- [ ] Handlers throw on failure — error factories or plain `Error`, no try/catch
+- [ ] `ctx.log` for logging, `ctx.enrich` for agent-facing context (this server is stateless — no `ctx.state`)
+- [ ] Handlers throw on failure — typed `ctx.fail` contract, error factories, or plain `Error`; no try/catch except to translate a service `McpError` into a contract reason
 - [ ] `format()` renders all data the LLM needs — different clients forward different surfaces (Claude Code → `structuredContent`, Claude Desktop → `content[]`); both must carry the same data
 - [ ] If wrapping external API: raw/domain/output schemas reviewed against real upstream sparsity/nullability before finalizing required vs optional fields
 - [ ] If wrapping external API: normalization and `format()` preserve uncertainty; do not fabricate facts from missing upstream data

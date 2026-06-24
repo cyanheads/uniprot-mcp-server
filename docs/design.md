@@ -247,14 +247,15 @@ The cross-tool hop: `get_entry.accessions[]` comes **only** from `search_protein
 | 1 | `uniprot_map_ids` | `from_db: "Gene_Name"` / `"Ensembl"` / `"ChEMBL"`, `to_db: "UniProtKB"`, `ids: ["TP53"]`, `tax_id: 9606` | enters from any sibling ID |
 | 2 | `uniprot_get_entry` | the `results[].to` accessions from step 1 | **input = step 1 output** |
 
-Live-verified gotcha that drives the design: `Gene_Name → UniProtKB` for `TP53`+human returns **one canonical Swiss-Prot accession plus dozens of TrEMBL isoform accessions** (`P04637, A0A087WT22, …`). So `to_db` exposes both `UniProtKB` (Swiss-Prot only — the usual intent) and `UniProtKB_AC-ID`, and the description steers agents to the reviewed target unless they want TrEMBL.
+Live-verified gotcha that drives the design: `Gene_Name → UniProtKB` for `TP53`+human returns **one canonical Swiss-Prot accession plus dozens of TrEMBL isoform accessions** (`P04637, A0A087WT22, …`). So `to_db` exposes both `UniProtKB-Swiss-Prot` (reviewed accessions only — the usual intent) and `UniProtKB` / `UniProtKB_AC-ID` (which include TrEMBL), and the description steers agents to the reviewed target unless they want TrEMBL.
 
-**`from_db`/`to_db` enum values** (most-used subset; full list at [UniProt ID mapping docs](https://www.uniprot.org/help/id_mapping)):
+**`from_db`/`to_db` enum values** — taken verbatim from the live `/configure/idmapping/fields` endpoint (most-used subset; full list at [UniProt ID mapping docs](https://www.uniprot.org/help/id_mapping)). The exact strings live in `ID_MAPPING_FROM_DBS` / `ID_MAPPING_TO_DBS` in `src/services/uniprot/types.ts`:
 
 | Value | Direction | Notes |
 |---|---|---|
 | `UniProtKB_AC-ID` | from/to | Accession or entry name (Swiss-Prot + TrEMBL) |
-| `UniProtKB` | to only | Swiss-Prot accessions only — use this to filter to reviewed entries |
+| `UniProtKB` | to only | Swiss-Prot + TrEMBL accessions |
+| `UniProtKB-Swiss-Prot` | to only | Reviewed (Swiss-Prot) accessions only — use this to filter to curated entries |
 | `Gene_Name` | from | HGNC gene symbol (e.g. `TP53`); pair with `taxon_id` to disambiguate species |
 | `GeneID` | from/to | NCBI Gene ID (integer) |
 | `Ensembl` | from/to | Ensembl gene stable ID (`ENSG…`) |
@@ -264,7 +265,7 @@ Live-verified gotcha that drives the design: `Gene_Name → UniProtKB` for `TP53
 | `RefSeq_Protein` | from/to | RefSeq protein accession (`NP_…`) |
 | `ChEMBL` | from/to | ChEMBL target ID (`CHEMBL…`) |
 | `PomBase` | from/to | PomBase gene systematic ID |
-| `Wormbase_Protein` | from/to | WormBase protein ID |
+| `WormBase_Protein` | from/to | WormBase protein ID |
 
 The Zod schema exposes this as `z.enum([...])` so invalid `from_db`/`to_db` values are caught at the edge before the upstream call. The async loop:
 
@@ -315,13 +316,20 @@ Per-tool typed contracts (`errors: [{ reason, code, when, recovery }]`) for the 
 | Tool | reason | code | when |
 |---|---|---|---|
 | `uniprot_search_proteins` | `missing_query` | `InvalidParams` | Neither `text_search` nor `query` provided. Recovery: provide one. |
+| `uniprot_search_proteins` | `conflicting_query` | `InvalidParams` | Both `text_search` and `query` provided. Recovery: pass only one. |
 | `uniprot_get_entry` | `all_not_found` | `NotFound` | Every accession in the batch is well-formed but unknown to UniProtKB (total failure). Partial failures (some found, some not) surface in `failed[]` in the success result, not as an error. Recovery: verify via `uniprot_search_proteins` or `uniprot_map_ids`. |
-| `uniprot_map_ids` | `unsupported_db_pair` | `InvalidParams` | `from_db`/`to_db` combination isn't supported by the ID-mapping service. Recovery: check the enum; route through `UniProtKB` as an intermediate. |
-| `uniprot_map_ids` | `mapping_in_progress` | *(not an error — `{status:'running', ticket}` result)* | Budget elapsed before `FINISHED`. The agent re-calls with the ticket. |
-| `uniprot_get_proteome` | `not_found` | `NotFound` | UPID/taxon has no proteome. Recovery: confirm the organism has a reference proteome; try taxonomy. |
+| `uniprot_map_ids` | `missing_inputs` | `InvalidParams` | Neither a resume `ticket` nor the full `from_db`/`to_db`/`ids` triple was provided. Recovery: supply the triple to start a job, or a ticket alone to resume. |
+| `uniprot_map_ids` | `unsupported_db_pair` | `InvalidParams` | `from_db`/`to_db` combination isn't supported by the ID-mapping service (a 400 at submission). Recovery: check the enum; route through `UniProtKB` as an intermediate. |
+| `uniprot_map_ids` | `invalid_ticket` | `NotFound` | The resume ticket is unknown or expired server-side (UniProt holds jobs only temporarily). Recovery: re-submit the original `from_db`/`to_db`/`ids`. |
+| `uniprot_get_proteome` | `missing_identifier` | `InvalidParams` | Neither `upid` nor `taxon_id` provided. Recovery: supply one; resolve a name first with `uniprot_get_taxonomy`. |
+| `uniprot_get_proteome` | `not_found` | `NotFound` | UPID/taxon has no reference proteome. Recovery: confirm the organism has one, or look it up via `uniprot_get_taxonomy`. |
+| `uniprot_get_taxonomy` | `missing_identifier` | `InvalidParams` | Neither `taxon_id` nor `name` provided. Recovery: supply one. |
 | `uniprot_get_taxonomy` | `not_found` | `NotFound` | Taxon ID/name unresolved. Recovery: check spelling or NCBI taxon ID. |
+| `uniprot_get_sequence` | `not_found` | `NotFound` | The accession has no sequence in UniProtKB. Recovery: verify via `uniprot_search_proteins` or `uniprot_map_ids`. |
 
-Malformed accession / UPID / taxon ID are caught by Zod `.regex()` at the schema edge → `ValidationError` before any upstream call (not a contract reason). `map_ids`'s "in progress" is a **success result variant**, not a thrown error — the agent treats it as a poll-again signal. `get_entry` partial failures (some accessions not found) are also **success result variants** — they surface in `failed[]` alongside the `succeeded[]` entries, not as thrown errors; the `all_not_found` contract reason fires only when the entire batch resolves to nothing.
+The `uniprot://entry/{accession}` and `uniprot://taxonomy/{taxonId}` resources each carry their own `not_found` (`NotFound`) contract, mirroring the by-ID tool path.
+
+Malformed accession / UPID / taxon ID are caught by Zod `.regex()` at the schema edge → `ValidationError` before any upstream call (not a contract reason). `map_ids`'s "running" status is a **success result variant** (`{status:'running', ticket}`), not a thrown error — the agent treats it as a poll-again signal; only an unknown/expired ticket throws (`invalid_ticket`). `get_entry` partial failures (some accessions not found) are also **success result variants** — they surface in `failed[]` alongside the `succeeded[]` entries, not as thrown errors; the `all_not_found` contract reason fires only when the entire batch resolves to nothing.
 
 ## Output Design Notes
 
@@ -336,7 +344,7 @@ Malformed accession / UPID / taxon ID are caught by Zod `.regex()` at the schema
 ## Known Limitations
 
 - **ID mapping is asynchronous and occasionally slow.** Small jobs finish in seconds (TP53 mapped in ~3s in testing), but large batches can exceed the inline budget → the agent must poll with the returned ticket. No way to make it synchronous; it's a server-side job by design.
-- **Large gene→protein mappings are TrEMBL-heavy.** One gene can map to dozens of unreviewed accessions. The `reviewed` filter and the `UniProtKB` (Swiss-Prot) vs `UniProtKB_AC-ID` `to_db` distinction mitigate, but the agent must still choose curation level.
+- **Large gene→protein mappings are TrEMBL-heavy.** One gene can map to dozens of unreviewed accessions. The `reviewed` filter and the `UniProtKB-Swiss-Prot` (reviewed only) vs `UniProtKB` / `UniProtKB_AC-ID` `to_db` distinction mitigate, but the agent must still choose curation level.
 - **Cursor-only deep pagination.** UniProtKB has no offset paging — only opaque `rel="next"` cursors. Random access to page N is impossible; the agent walks forward or narrows the query.
 - **Taxonomy children aren't inline.** The taxon record carries `parent` + `lineage` but not children — `include_children` costs a second search call (`parent:{taxonId}`).
 - **A single oversized section can still overflow.** `outlineOnOverflow` outlines *between* sections; one section that alone exceeds budget (a giant FUNCTION comment) returns whole. Sub-section outlining is out of scope.
