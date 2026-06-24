@@ -2,8 +2,8 @@
   "manifest_version": "0.3",
   "name": "uniprot-mcp-server",
   "version": "0.1.0",
-  "description": "",
-  "author": { "name": "" },
+  "description": "Protein function and annotation research over UniProtKB — search by what proteins do, fetch curated records, map IDs across the bioinformatics ecosystem, and pull reference proteomes and taxonomy. Keyless.",
+  "author": { "name": "cyanheads" },
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",

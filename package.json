@@ -1,7 +1,7 @@
 {
   "name": "uniprot-mcp-server",
   "version": "0.1.0",
-  "description": "",
+  "description": "Protein function and annotation research over UniProtKB — search by what proteins do, fetch curated records, map IDs across the bioinformatics ecosystem, and pull reference proteomes and taxonomy. Keyless.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -39,14 +39,10 @@
     "start:stdio": "MCP_TRANSPORT_TYPE=stdio node dist/index.js",
     "start:http": "MCP_TRANSPORT_TYPE=http node dist/index.js"
   },
-  "keywords": [
-    "mcp",
-    "mcp-server",
-    "model-context-protocol"
-  ],
+  "keywords": ["mcp", "mcp-server", "model-context-protocol"],
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/cyanheads/uniprot-mcp-server.git"
   },
   "license": "Apache-2.0",
   "engines": {
@@ -62,8 +58,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.16",
-    "@types/node": "25.9.3",
+    "@biomejs/biome": "2.5.1",
+    "@types/node": "^26.0.0",
     "depcheck": "^1.4.7",
     "ignore": "^7.0.5",
     "tsc-alias": "^1.8.17",
