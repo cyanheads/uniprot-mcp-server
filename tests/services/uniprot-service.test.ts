@@ -54,19 +54,38 @@ afterEach(() => {
 });
 
 describe('UniProtService — error classification', () => {
-  it('classifies a 404 from the taxonomy endpoint as a typed notFound', async () => {
-    fetchWithTimeoutMock.mockRejectedValue(new Error('Request failed with status code 404'));
+  it('rewrites a framework NotFound from the taxonomy endpoint to a clean domain message', async () => {
+    // fetchWithTimeout maps a 404 to McpError(NotFound) with a "Fetch failed … Status: 404"
+    // message — the service must detect it by code, not by string-matching, and replace the
+    // leaky raw-URL message with a domain one.
+    fetchWithTimeoutMock.mockRejectedValue(
+      new McpError(
+        JsonRpcErrorCode.NotFound,
+        'Fetch failed for https://rest.uniprot.org/taxonomy/99999999. Status: 404',
+        { statusCode: 404 },
+      ),
+    );
     const err = await service.getTaxonById(99999999, ctx()).catch((e) => e as McpError);
     expect(err).toBeInstanceOf(McpError);
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+    expect(err.message).toBe('No taxonomy record for taxon ID 99999999.');
+    expect(err.message).not.toMatch(/Status: 404|rest\.uniprot\.org/);
     expect(err.data).toMatchObject({ taxonId: 99999999 });
   });
 
-  it('classifies a 404 on the FASTA endpoint as notFound', async () => {
-    fetchWithTimeoutMock.mockRejectedValue(new Error('not found (status code 404)'));
-    const err = await service.getFasta('Q99999', false, ctx()).catch((e) => e as McpError);
+  it('rewrites a framework NotFound on the FASTA endpoint to a clean domain message', async () => {
+    fetchWithTimeoutMock.mockRejectedValue(
+      new McpError(
+        JsonRpcErrorCode.NotFound,
+        'Fetch failed for https://rest.uniprot.org/uniprotkb/Q6ZZZ9.fasta. Status: 404',
+        { statusCode: 404 },
+      ),
+    );
+    const err = await service.getFasta('Q6ZZZ9', false, ctx()).catch((e) => e as McpError);
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
-    expect(err.data).toMatchObject({ accession: 'Q99999' });
+    expect(err.message).toBe('No sequence found for accession Q6ZZZ9.');
+    expect(err.message).not.toMatch(/Status: 404|rest\.uniprot\.org/);
+    expect(err.data).toMatchObject({ accession: 'Q6ZZZ9' });
   });
 
   it('throws notFound when no proteome matches the query', async () => {
@@ -228,6 +247,38 @@ describe('UniProtService — getEntries batch', () => {
     const entries = await service.getEntries(['P04637', 'Q99999'], undefined, ctx());
     expect(entries).toHaveLength(1);
     expect(entries[0]?.accession).toBe('P04637');
+  });
+
+  it('merges the mandatory identity fields into a caller-supplied fields projection', async () => {
+    // UniProt omits `id` (entryName) unless requested, so a custom `fields` that drops it would
+    // crash the required EntrySchema. The service must always carry the identity columns.
+    fetchWithTimeoutMock.mockResolvedValue(
+      jsonResponse({
+        results: [
+          {
+            primaryAccession: 'P04637',
+            uniProtkbId: 'P53_HUMAN',
+            entryType: 'UniProtKB reviewed (Swiss-Prot)',
+            sequence: { length: 393 },
+            organism: { scientificName: 'Homo sapiens', taxonId: 9606 },
+          },
+        ],
+      }),
+    );
+
+    const entries = await service.getEntries(['P04637'], 'accession,gene_names,cc_function', ctx());
+    expect(entries[0]?.entryName).toBe('P53_HUMAN');
+
+    const sentUrl = String(fetchWithTimeoutMock.mock.calls[0]?.[0]);
+    const sentFields = new URL(sentUrl).searchParams.get('fields') ?? '';
+    const fieldSet = new Set(sentFields.split(','));
+    // Identity/provenance columns are present even though the caller did not request them.
+    expect(fieldSet).toContain('id');
+    expect(fieldSet).toContain('length');
+    expect(fieldSet).toContain('annotation_score');
+    expect(fieldSet).toContain('protein_existence');
+    // The caller's requested section field survives the merge.
+    expect(fieldSet).toContain('cc_function');
   });
 });
 

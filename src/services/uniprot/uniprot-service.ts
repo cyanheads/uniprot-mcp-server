@@ -12,7 +12,12 @@
 
 import type { Context } from '@cyanheads/mcp-ts-core';
 import type { AppConfig } from '@cyanheads/mcp-ts-core/config';
-import { notFound, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
+import {
+  JsonRpcErrorCode,
+  McpError,
+  notFound,
+  serviceUnavailable,
+} from '@cyanheads/mcp-ts-core/errors';
 import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import type { RequestContext } from '@cyanheads/mcp-ts-core/utils';
 import { fetchWithTimeout, requestContextService, withRetry } from '@cyanheads/mcp-ts-core/utils';
@@ -42,7 +47,11 @@ import type {
   TaxonChild,
   Variant,
 } from '@/services/uniprot/types.js';
-import { DEFAULT_ENTRY_FIELDS, DEFAULT_SEARCH_FIELDS } from '@/services/uniprot/types.js';
+import {
+  DEFAULT_ENTRY_FIELDS,
+  DEFAULT_SEARCH_FIELDS,
+  MANDATORY_ENTRY_FIELDS,
+} from '@/services/uniprot/types.js';
 
 /** Strip evidence-reference parentheticals (e.g. `(PubMed:12345)`) for a clean snippet. */
 function stripEvidence(text: string): string {
@@ -243,7 +252,7 @@ export class UniProtService {
   ): Promise<Entry[]> {
     const url = new URL(`${this.baseUrl}/uniprotkb/search`);
     url.searchParams.set('query', `accession:(${accessions.join(' OR ')})`);
-    url.searchParams.set('fields', fields ?? DEFAULT_ENTRY_FIELDS);
+    url.searchParams.set('fields', this.entryFields(fields));
     url.searchParams.set('format', 'json');
     url.searchParams.set('size', String(accessions.length));
 
@@ -253,6 +262,23 @@ export class UniProtService {
       ctx,
     );
     return (data.results ?? []).map((e) => this.normalizeEntry(e));
+  }
+
+  /**
+   * Resolve the upstream `fields` for an entry fetch. A caller-supplied `fields`
+   * trims sections but always carries the mandatory identity/provenance columns
+   * the required output schema demands — UniProt omits `id`, `length`, score,
+   * existence, and organism unless explicitly requested, so without this a custom
+   * `fields` would crash on the missing `entryName` or fabricate provenance.
+   */
+  private entryFields(fields: string | undefined): string {
+    if (!fields) return DEFAULT_ENTRY_FIELDS;
+    const requested = fields
+      .split(',')
+      .map((f) => f.trim())
+      .filter(Boolean);
+    const merged = new Set<string>([...MANDATORY_ENTRY_FIELDS, ...requested]);
+    return [...merged].join(',');
   }
 
   // ---------------------------------------------------------------------------
@@ -445,7 +471,7 @@ export class UniProtService {
       const { data } = await this.getJson<RawTaxon>(url, 'uniprot.getTaxonById', ctx);
       return normalizeTaxon(data);
     } catch (err) {
-      if (err instanceof Error && /not found|status code 404|no such/i.test(err.message)) {
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw notFound(`No taxonomy record for taxon ID ${taxonId}.`, { taxonId });
       }
       throw err;
@@ -508,7 +534,7 @@ export class UniProtService {
       this.guardHtml(body);
       return body;
     }).catch((err) => {
-      if (err instanceof Error && /not found|status code 404/i.test(err.message)) {
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw notFound(`No sequence found for accession ${accession}.`, { accession });
       }
       throw err;

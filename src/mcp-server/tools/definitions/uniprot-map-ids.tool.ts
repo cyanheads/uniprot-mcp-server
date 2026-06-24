@@ -9,7 +9,7 @@
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
-import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { ID_MAPPING_FROM_DBS, ID_MAPPING_TO_DBS } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
@@ -111,12 +111,33 @@ export const mapIds = tool('uniprot_map_ids', {
       when: 'The from_db/to_db combination is not supported by the ID-mapping service.',
       recovery: 'Check the enum values, or route through UniProtKB as an intermediate database.',
     },
+    {
+      reason: 'invalid_ticket',
+      code: JsonRpcErrorCode.NotFound,
+      when: 'The resume ticket is unknown or has expired server-side (UniProt holds jobs only temporarily).',
+      recovery: 'Re-submit the original from_db/to_db/ids to start a fresh mapping job.',
+    },
   ],
 
   async handler(input, ctx) {
     // Resume path — ticket alone.
     if (input.ticket) {
-      const result = await getUniProtService().resumeMapping(input.ticket, ctx);
+      let result: Awaited<ReturnType<ReturnType<typeof getUniProtService>['resumeMapping']>>;
+      try {
+        result = await getUniProtService().resumeMapping(input.ticket, ctx);
+      } catch (err) {
+        // An unknown/expired ticket surfaces as a 404 (→ NotFound) from the status endpoint.
+        if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
+          throw ctx.fail(
+            'invalid_ticket',
+            `Mapping ticket "${input.ticket}" is unknown or expired.`,
+            {
+              ...ctx.recoveryFor('invalid_ticket'),
+            },
+          );
+        }
+        throw err;
+      }
       if (result.status === 'running') {
         ctx.enrich.notice('Mapping job is still running. Re-call with the same ticket shortly.');
         return { status: 'running' as const, ticket: result.ticket };
@@ -137,11 +158,10 @@ export const mapIds = tool('uniprot_map_ids', {
     try {
       result = await service.mapIds(input.from_db, input.to_db, input.ids, input.tax_id, ctx);
     } catch (err) {
-      // UniProt rejects unsupported pairs at submission with a 400 + message.
-      if (
-        err instanceof Error &&
-        /not supported|invalid.*(from|to)|status code 400/i.test(err.message)
-      ) {
+      // UniProt rejects unsupported pairs at submission with a 400, which the
+      // framework classifies as InvalidParams. Detect by code — the raw message
+      // ("Fetch failed … Status: 400") carries neither the pair nor "not supported".
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
         throw ctx.fail(
           'unsupported_db_pair',
           `Mapping ${input.from_db} → ${input.to_db} is not supported.`,

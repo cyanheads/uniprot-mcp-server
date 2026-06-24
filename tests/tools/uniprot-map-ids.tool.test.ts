@@ -117,7 +117,15 @@ describe('mapIds start path', () => {
   });
 
   it('maps an unsupported db pair (400 from the service) to the unsupported_db_pair contract', async () => {
-    mapIdsMock.mockRejectedValue(new Error('The combination is not supported (status code 400).'));
+    // fetchWithTimeout maps a 400 to McpError(InvalidParams) with a "Fetch failed … Status: 400"
+    // message — the handler must detect it by code, not by string-matching the message.
+    mapIdsMock.mockRejectedValue(
+      new McpError(
+        JsonRpcErrorCode.InvalidParams,
+        'Fetch failed for https://rest.uniprot.org/idmapping/run. Status: 400',
+        { statusCode: 400 },
+      ),
+    );
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({
       from_db: 'PomBase',
@@ -129,6 +137,7 @@ describe('mapIds start path', () => {
     expect(err).toBeInstanceOf(McpError);
     expect(err.code).toBe(JsonRpcErrorCode.InvalidParams);
     expect(err.data).toMatchObject({ reason: 'unsupported_db_pair' });
+    expect(err.message).not.toMatch(/Status: 400|rest\.uniprot\.org/);
   });
 
   it('lets an unrelated service error bubble (not coerced to unsupported_db_pair)', async () => {
@@ -174,6 +183,26 @@ describe('mapIds resume path', () => {
     expect(result.status).toBe('running');
     expect(result.ticket).toBe('job-123');
     expect(getEnrichment(ctx).notice).toContain('still running');
+  });
+
+  it('maps an unknown/expired ticket (404 from the status endpoint) to the invalid_ticket contract', async () => {
+    // The status endpoint 404s for a stale ticket; fetchWithTimeout surfaces it as
+    // McpError(NotFound) with a leaky raw-URL message the handler must replace.
+    resumeMappingMock.mockRejectedValue(
+      new McpError(
+        JsonRpcErrorCode.NotFound,
+        'Fetch failed for https://rest.uniprot.org/idmapping/status/stale-job. Status: 404',
+        { statusCode: 404 },
+      ),
+    );
+    const ctx = createMockContext({ errors: mapIds.errors });
+    const input = mapIds.input.parse({ ticket: 'stale-job' });
+
+    const err = await mapIds.handler(input, ctx).catch((e) => e as McpError);
+    expect(err).toBeInstanceOf(McpError);
+    expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+    expect(err.data).toMatchObject({ reason: 'invalid_ticket' });
+    expect(err.message).not.toMatch(/Status: 404|rest\.uniprot\.org/);
   });
 });
 

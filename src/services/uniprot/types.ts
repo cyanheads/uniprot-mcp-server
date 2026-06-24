@@ -63,6 +63,28 @@ export const DEFAULT_SEARCH_FIELDS =
 export const DEFAULT_ENTRY_FIELDS =
   'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence,cc_function,cc_catalytic_activity,cc_cofactor,cc_subcellular_location,cc_disease,ft_mod_res,ft_carbohyd,ft_variant,cc_alternative_products,ft_domain,ft_region,go,keyword,xref_pdb,xref_ensembl,xref_refseq,xref_chembl';
 
+/**
+ * UniProtKB fields that back the required (non-optional) columns of the entry
+ * output schema. UniProt only returns `id`, `length`, `annotation_score`,
+ * `protein_existence`, and the organism fields when they are explicitly
+ * requested, so a caller-supplied `fields` that omits them would otherwise drop
+ * `entryName` (a hard schema-validation crash) or silently fabricate
+ * provenance (`0` score, `unknown` existence). These are always merged into the
+ * upstream request so a custom `fields` trims sections without dropping identity.
+ */
+export const MANDATORY_ENTRY_FIELDS = [
+  'accession',
+  'id',
+  'protein_name',
+  'gene_names',
+  'organism_name',
+  'organism_id',
+  'length',
+  'reviewed',
+  'annotation_score',
+  'protein_existence',
+] as const;
+
 /** Organism block shared across hits, entries, and proteomes. */
 export type Organism = {
   scientificName: string;
