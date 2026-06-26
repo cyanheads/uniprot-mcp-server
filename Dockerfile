@@ -39,7 +39,7 @@ ENV NODE_ENV=production
 # OCI image metadata (https://github.com/opencontainers/image-spec/blob/main/annotations.md)
 ARG APP_VERSION
 LABEL org.opencontainers.image.title="uniprot-mcp-server"
-LABEL org.opencontainers.image.description="Protein function and annotation research over UniProtKB — search by what proteins do, fetch curated records, map IDs across the bioinformatics ecosystem, and pull reference proteomes and taxonomy. Keyless."
+LABEL org.opencontainers.image.description="Search UniProtKB by protein function, fetch curated records, map IDs across databases, and pull reference proteomes, taxonomy, and sequences via MCP. STDIO or Streamable HTTP."
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.version="${APP_VERSION}"
 LABEL org.opencontainers.image.source="https://github.com/cyanheads/uniprot-mcp-server"

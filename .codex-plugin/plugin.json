@@ -1,20 +1,20 @@
 {
   "name": "uniprot-mcp-server",
-  "version": "0.1.0",
-  "description": "Protein function and annotation research over UniProtKB — search by what proteins do, fetch curated records, map IDs across the bioinformatics ecosystem, and pull reference proteomes and taxonomy. Keyless.",
+  "version": "0.1.1",
+  "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
   "author": {
     "name": "cyanheads",
     "email": "casey@caseyjhand.com",
     "url": "https://github.com/cyanheads"
   },
-  "homepage": "https://github.com/cyanheads/uniprot-mcp-server",
+  "homepage": "https://github.com/cyanheads/uniprot-mcp-server#readme",
   "repository": "https://github.com/cyanheads/uniprot-mcp-server",
   "license": "Apache-2.0",
-  "keywords": ["mcp", "mcp-server", "model-context-protocol"],
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "uniprot", "uniprotkb", "protein", "bioinformatics"],
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "uniprot-mcp-server",
-    "shortDescription": "Protein-first research over UniProtKB — search, fetch curated records, map IDs, proteomes, taxonomy.",
+    "shortDescription": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
     "longDescription": "The protein-as-primary-entity research workflow over UniProt. Search UniProtKB by function, keyword, GO term, gene, or organism; retrieve full curated Swiss-Prot entries (function, catalytic activity, subcellular location, disease, PTMs, isoforms, sequence, cross-references); map identifiers across 100+ databases via the async ID-mapping service; and pull reference proteomes and taxonomy. Keyless, CC BY 4.0.",
     "developerName": "cyanheads",
     "category": "research",

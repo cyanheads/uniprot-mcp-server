@@ -6,14 +6,14 @@
     "url": "https://github.com/cyanheads/uniprot-mcp-server",
     "source": "github"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "uniprot-mcp-server",
-      "runtimeHint": "node",
-      "version": "0.1.0",
+      "identifier": "@cyanheads/uniprot-mcp-server",
+      "runtimeHint": "bun",
+      "version": "0.1.1",
       "packageArguments": [
         {
           "type": "positional",
@@ -40,9 +40,9 @@
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
-      "identifier": "uniprot-mcp-server",
-      "runtimeHint": "node",
-      "version": "0.1.0",
+      "identifier": "@cyanheads/uniprot-mcp-server",
+      "runtimeHint": "bun",
+      "version": "0.1.1",
       "packageArguments": [
         {
           "type": "positional",

@@ -1,9 +1,14 @@
 {
   "manifest_version": "0.3",
   "name": "uniprot-mcp-server",
-  "version": "0.1.0",
-  "description": "Protein function and annotation research over UniProtKB — search by what proteins do, fetch curated records, map IDs across the bioinformatics ecosystem, and pull reference proteomes and taxonomy. Keyless.",
+  "version": "0.1.1",
+  "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
   "author": { "name": "cyanheads" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cyanheads/uniprot-mcp-server"
+  },
+  "homepage": "https://github.com/cyanheads/uniprot-mcp-server#readme",
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",
