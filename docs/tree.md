@@ -1,6 +1,6 @@
 # uniprot-mcp-server - Directory Structure
 
-Generated on: 2026-06-26 00:11:45
+Generated on: 2026-06-28 04:56:44
 
 ```text
 uniprot-mcp-server/
@@ -19,6 +19,7 @@ uniprot-mcp-server/
 │   └── settings.json
 ├── changelog/
 │   ├── 0.1.x/
+│   ├── 0.2.x/
 │   └── template.md
 ├── docs/
 │   ├── design.md
