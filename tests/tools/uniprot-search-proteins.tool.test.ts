@@ -139,6 +139,37 @@ describe('searchProteins handler', () => {
     expect(notice).toContain('TrEMBL');
   });
 
+  it('passes a mandatory-columns-only hit through without an output-validation crash', async () => {
+    // The shape a restrictive custom `fields` yields once the service merges in
+    // MANDATORY_SEARCH_FIELDS — only the required ProteinHit columns, no
+    // proteinName/functionSnippet/commonName. Must still satisfy the output schema.
+    searchMock.mockResolvedValue({
+      results: [
+        {
+          accession: 'P04637',
+          entryName: 'P53_HUMAN',
+          geneNames: ['TP53'],
+          organism: { scientificName: 'Homo sapiens', taxonId: 9606 },
+          length: 393,
+          reviewed: true,
+          annotationScore: 5,
+          proteinExistence: '1: Evidence at protein level',
+        },
+      ],
+      totalResults: 1,
+    } satisfies SearchPage);
+    const ctx = createMockContext({ errors: searchProteins.errors });
+    const input = searchProteins.input.parse({
+      query: 'gene:TP53',
+      fields: 'accession,gene_names',
+    });
+
+    const result = await searchProteins.handler(input, ctx);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]?.proteinName).toBeUndefined();
+    expect(result).toEqual(expect.schemaMatching(searchProteins.output));
+  });
+
   it('passes facets through to the output when present', async () => {
     searchMock.mockResolvedValue({
       ...onePage,

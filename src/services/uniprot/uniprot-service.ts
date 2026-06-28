@@ -51,6 +51,7 @@ import {
   DEFAULT_ENTRY_FIELDS,
   DEFAULT_SEARCH_FIELDS,
   MANDATORY_ENTRY_FIELDS,
+  MANDATORY_SEARCH_FIELDS,
 } from '@/services/uniprot/types.js';
 
 /**
@@ -258,7 +259,7 @@ export class UniProtService {
   ): Promise<SearchPage> {
     const url = new URL(`${this.baseUrl}/uniprotkb/search`);
     url.searchParams.set('query', query);
-    url.searchParams.set('fields', opts.fields ?? DEFAULT_SEARCH_FIELDS);
+    url.searchParams.set('fields', this.searchFields(opts.fields));
     url.searchParams.set('format', 'json');
     url.searchParams.set('size', String(opts.size ?? getServerConfig().defaultPageSize));
     if (opts.facets) url.searchParams.set('facets', opts.facets);
@@ -278,6 +279,25 @@ export class UniProtService {
     const cursor = this.parseNextCursor(response);
 
     return { results, totalResults, ...(cursor ? { cursor } : {}), ...(facets ? { facets } : {}) };
+  }
+
+  /**
+   * Resolve the upstream `fields` for a search. A caller-supplied `fields` trims
+   * the projection but always carries the mandatory identity/provenance columns
+   * the required `ProteinHit` output schema demands — UniProt omits `id`,
+   * `length`, organism, score, and existence unless explicitly requested, so
+   * without this a custom `fields` (e.g. "accession,gene_names") would crash on
+   * the missing `entryName` or fabricate provenance. Returns the default set when
+   * none is given. Mirrors `entryFields()`.
+   */
+  private searchFields(fields: string | undefined): string {
+    if (!fields) return DEFAULT_SEARCH_FIELDS;
+    const requested = fields
+      .split(',')
+      .map((f) => f.trim())
+      .filter(Boolean);
+    const merged = new Set<string>([...MANDATORY_SEARCH_FIELDS, ...requested]);
+    return [...merged].join(',');
   }
 
   // ---------------------------------------------------------------------------
@@ -561,14 +581,30 @@ export class UniProtService {
   // Sequences (FASTA)
   // ---------------------------------------------------------------------------
 
-  /** Fetch canonical (+ optional isoform) sequences as FASTA and parse the records. */
+  /**
+   * Fetch canonical (+ optional isoform) sequences as FASTA and parse the records.
+   *
+   * The per-accession FASTA endpoint (`/uniprotkb/{accession}.fasta`) silently
+   * ignores `includeIsoform` and only ever returns the canonical record, so the
+   * isoform path goes through the search endpoint instead
+   * (`/uniprotkb/search?query=accession:{accession}&format=fasta&includeIsoform=true`),
+   * which honors the flag and returns the canonical plus every isoform as a
+   * multi-record FASTA blob. The canonical-only path stays on the cheaper
+   * per-accession endpoint.
+   */
   async getFasta(
     accession: string,
     includeIsoforms: boolean,
     ctx: Context,
   ): Promise<SequenceRecord[]> {
-    const url = new URL(`${this.baseUrl}/uniprotkb/${accession}.fasta`);
-    if (includeIsoforms) url.searchParams.set('includeIsoform', 'true');
+    const url = includeIsoforms
+      ? new URL(`${this.baseUrl}/uniprotkb/search`)
+      : new URL(`${this.baseUrl}/uniprotkb/${accession}.fasta`);
+    if (includeIsoforms) {
+      url.searchParams.set('query', `accession:${accession}`);
+      url.searchParams.set('format', 'fasta');
+      url.searchParams.set('includeIsoform', 'true');
+    }
 
     const reqCtx = this.reqCtx('uniprot.getFasta', ctx);
     const text = await this.withRetry('uniprot.getFasta', ctx, async () => {

@@ -341,10 +341,32 @@ describe('UniProtService — search parsing', () => {
     const page = await service.search('gene:TP53', {}, ctx());
     expect(page.results[0]?.functionSnippet).toBe('Acts as a tumor suppressor.');
   });
+
+  it('merges the mandatory identity fields into a caller-supplied search projection', async () => {
+    // UniProt omits id/length/organism/score/existence unless requested, so a custom
+    // `fields` (e.g. accession,gene_names) that drops them would crash the required
+    // ProteinHit output schema. The service must always carry the identity columns.
+    fetchWithTimeoutMock.mockResolvedValue(
+      jsonResponse({ results: [] }, { 'x-total-results': '0' }),
+    );
+
+    await service.search('gene:TP53', { fields: 'accession,gene_names' }, ctx());
+
+    const sentUrl = String(fetchWithTimeoutMock.mock.calls[0]?.[0]);
+    const sentFields = new Set((new URL(sentUrl).searchParams.get('fields') ?? '').split(','));
+    // Identity/provenance columns are present even though the caller did not request them.
+    expect(sentFields).toContain('id');
+    expect(sentFields).toContain('organism_name');
+    expect(sentFields).toContain('length');
+    expect(sentFields).toContain('annotation_score');
+    expect(sentFields).toContain('protein_existence');
+    // The caller's requested column survives the merge.
+    expect(sentFields).toContain('gene_names');
+  });
 });
 
 describe('UniProtService — FASTA parsing', () => {
-  it('parses canonical + isoform records and derives lengths', async () => {
+  it('routes include_isoforms through the search endpoint and parses canonical + isoform records', async () => {
     const fasta = [
       '>sp|P04637|P53_HUMAN Cellular tumor antigen p53 OS=Homo sapiens OX=9606 GN=TP53 PE=1 SV=4',
       'MEEPQSDPSV',
@@ -361,6 +383,24 @@ describe('UniProtService — FASTA parsing', () => {
     expect(canonical?.length).toBe(20); // two 10-residue lines joined
     const isoform = records.find((r) => r.isoformId === 'P04637-2');
     expect(isoform?.length).toBe(10);
+
+    // The per-accession .fasta endpoint silently ignores includeIsoform and only ever
+    // returns the canonical record, so the isoform path must hit the search endpoint.
+    const sentUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(sentUrl.pathname).toBe('/uniprotkb/search');
+    expect(sentUrl.searchParams.get('query')).toBe('accession:P04637');
+    expect(sentUrl.searchParams.get('includeIsoform')).toBe('true');
+    expect(sentUrl.searchParams.get('format')).toBe('fasta');
+  });
+
+  it('uses the per-accession FASTA endpoint (not search) when isoforms are not requested', async () => {
+    const fasta = ['>sp|P04637|P53_HUMAN Cellular tumor antigen p53', 'MEEPQSDPSV', ''].join('\n');
+    fetchWithTimeoutMock.mockResolvedValue(jsonResponse(fasta));
+
+    await service.getFasta('P04637', false, ctx());
+    const sentUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(sentUrl.pathname).toBe('/uniprotkb/P04637.fasta');
+    expect(sentUrl.searchParams.has('includeIsoform')).toBe(false);
   });
 
   it('throws notFound when the FASTA body parses to zero records (empty body)', async () => {

@@ -86,6 +86,28 @@ export const MANDATORY_ENTRY_FIELDS = [
 ] as const;
 
 /**
+ * UniProtKB fields that back the required (non-optional) columns of the search
+ * output schema (`ProteinHit`). Mirrors `MANDATORY_ENTRY_FIELDS` minus
+ * `protein_name` (optional on a hit). UniProt omits `id`, `length`, organism,
+ * `annotation_score`, `protein_existence`, and `reviewed` unless explicitly
+ * requested, so a caller-supplied `fields` (e.g. `accession,gene_names`) that
+ * drops them would crash on the missing `entryName` or fabricate provenance.
+ * Always merged into the upstream search request so a custom `fields` trims the
+ * projection without dropping the identity/provenance columns.
+ */
+export const MANDATORY_SEARCH_FIELDS = [
+  'accession',
+  'id',
+  'gene_names',
+  'organism_name',
+  'organism_id',
+  'length',
+  'reviewed',
+  'annotation_score',
+  'protein_existence',
+] as const;
+
+/**
  * UniProtKB primary accession pattern. Covers both the 6-character format
  * (OPQ-prefix) and the 10-character format (1 or 2 alpha–digit–alpha3–digit
  * groups), used by tools and resources to validate input before calling the
