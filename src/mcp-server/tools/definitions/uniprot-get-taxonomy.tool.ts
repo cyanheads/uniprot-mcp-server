@@ -99,6 +99,12 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
       recovery: 'Provide an NCBI taxon ID or a scientific name to resolve.',
     },
     {
+      reason: 'conflicting_identifier',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'Both taxon_id and name were provided.',
+      recovery: 'Provide only one of taxon_id or name, not both, then retry.',
+    },
+    {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
       when: 'The taxon ID or name did not resolve to a record.',
@@ -110,6 +116,11 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
     const name = input.name?.trim();
     if (!input.taxon_id && !name) {
       throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
+    }
+    if (input.taxon_id && name) {
+      throw ctx.fail('conflicting_identifier', undefined, {
+        ...ctx.recoveryFor('conflicting_identifier'),
+      });
     }
 
     const service = getUniProtService();

@@ -127,6 +127,23 @@ describe('searchProteins handler', () => {
     expect(getEnrichment(ctx)).toMatchObject({ cursor: 'NEXT' });
   });
 
+  it('declares cursor/total/effective-query so they reach content[], not only the store', async () => {
+    // Parity guard: the follow-up metadata must be declared in the enrichment block,
+    // or the effective-output parse strips it from both structuredContent and the
+    // content[] trailer — leaving text-only clients without the next page or count.
+    searchMock.mockResolvedValue({ ...onePage, totalResults: 4457, cursor: 'NEXT' });
+    const ctx = createMockContext({ errors: searchProteins.errors });
+    const input = searchProteins.input.parse({ text_search: 'kinase', organism_id: 9606 });
+
+    const result = await searchProteins.handler(input, ctx);
+    const effective = searchProteins.output
+      .extend(searchProteins.enrichment)
+      .parse({ ...result, ...getEnrichment(ctx) });
+    expect(effective.totalResults).toBe(4457);
+    expect(effective.cursor).toBe('NEXT');
+    expect(effective.effectiveQuery).toContain('organism_id:9606');
+  });
+
   it('emits a broaden-the-search notice on zero results', async () => {
     searchMock.mockResolvedValue({ results: [], totalResults: 0 } satisfies SearchPage);
     const ctx = createMockContext({ errors: searchProteins.errors });

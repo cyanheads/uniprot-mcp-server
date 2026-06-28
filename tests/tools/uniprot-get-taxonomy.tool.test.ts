@@ -65,6 +65,32 @@ describe('getTaxonomy', () => {
     });
   });
 
+  it('throws conflicting_identifier when both taxon_id and name are provided', async () => {
+    // The tool tells callers to provide exactly one — contradictory identifiers must
+    // be rejected, not silently resolved down the taxon_id path (which would answer
+    // the wrong organism relative to the caller's intent).
+    const ctx = createMockContext({ errors: getTaxonomy.errors });
+    const input = getTaxonomy.input.parse({ taxon_id: 9606, name: 'Mus musculus' });
+    await expect(getTaxonomy.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.InvalidParams,
+      data: { reason: 'conflicting_identifier' },
+    });
+    expect(getTaxonByIdMock).not.toHaveBeenCalled();
+    expect(getTaxonByNameMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a whitespace-only name alongside a taxon_id as non-conflicting', async () => {
+    // A form client may submit name:"" with a real taxon_id — that is the taxon_id
+    // path, not a conflict.
+    getTaxonByIdMock.mockResolvedValue(human);
+    const ctx = createMockContext({ errors: getTaxonomy.errors });
+    const input = getTaxonomy.input.parse({ taxon_id: 9606, name: '   ' });
+
+    const result = await getTaxonomy.handler(input, ctx);
+    expect(getTaxonByIdMock).toHaveBeenCalledWith(9606, ctx);
+    expect(result.taxon.taxonId).toBe(9606);
+  });
+
   it('routes a by-id NotFound through ctx.fail("not_found") with a clean typed error', async () => {
     getTaxonByIdMock.mockRejectedValue(
       notFound('No taxonomy record for taxon ID 99999999.', { taxonId: 99999999 }),

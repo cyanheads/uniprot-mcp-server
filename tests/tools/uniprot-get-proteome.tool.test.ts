@@ -72,6 +72,30 @@ describe('getProteome', () => {
     expect(getProteomeMock).not.toHaveBeenCalled();
   });
 
+  it('throws conflicting_identifier when both upid and taxon_id are provided', async () => {
+    // Contradictory identifiers must be rejected, not silently resolved down the upid
+    // path (which would return the wrong proteome relative to the caller's intent).
+    const ctx = createMockContext({ errors: getProteome.errors });
+    const input = getProteome.input.parse({ upid: 'UP000005640', taxon_id: 10090 });
+    await expect(getProteome.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.InvalidParams,
+      data: { reason: 'conflicting_identifier' },
+    });
+    expect(getProteomeMock).not.toHaveBeenCalled();
+  });
+
+  it('treats an empty-string upid alongside a taxon_id as non-conflicting', async () => {
+    // A form client may submit upid:"" with a real taxon_id — that is the taxon_id
+    // path, not a conflict.
+    getProteomeMock.mockResolvedValue(humanProteome);
+    const ctx = createMockContext({ errors: getProteome.errors });
+    const input = getProteome.input.parse({ upid: '', taxon_id: 9606 });
+
+    const result = await getProteome.handler(input, ctx);
+    expect(getProteomeMock).toHaveBeenCalledWith({ taxonId: 9606 }, ctx);
+    expect(result.proteome.upid).toBe('UP000005640');
+  });
+
   it('routes the service NotFound through ctx.fail("not_found") with a clean typed error', async () => {
     getProteomeMock.mockRejectedValue(
       notFound('No reference proteome found for taxon 99999999.', { taxonId: 99999999 }),
@@ -146,6 +170,41 @@ describe('getProteome', () => {
       cursor: 'NEXT_CURSOR',
       totalProteinsMatched: 147506,
     });
+  });
+
+  it('declares the truncation guidance so it reaches content[], not only the store', async () => {
+    // Regression: ctx.enrich.truncated() writes a `notice` guidance string, but
+    // unless `notice` is declared in the enrichment block the effective-output parse
+    // strips it from both structuredContent and the content[] trailer — leaving
+    // text-only clients with the cap but not how to page past it.
+    getProteomeMock.mockResolvedValue(humanProteome);
+    getProteomeProteinsMock.mockResolvedValue({
+      proteins: [
+        {
+          accession: 'P04637',
+          entryName: 'P53_HUMAN',
+          geneNames: ['TP53'],
+          organism: { scientificName: 'Homo sapiens', taxonId: 9606 },
+          length: 393,
+          reviewed: true,
+          annotationScore: 5,
+          proteinExistence: '1: Evidence at protein level',
+        },
+      ],
+      totalResults: 147506,
+      cursor: 'NEXT_CURSOR',
+    } satisfies ProteomeProteinPage);
+    const ctx = createMockContext({ errors: getProteome.errors });
+    const input = getProteome.input.parse({ taxon_id: 9606, include_proteins: true, size: 1 });
+
+    const result = await getProteome.handler(input, ctx);
+    // The effective output the framework builds (output + enrichment) — what both
+    // structuredContent and the content[] trailer are rendered from.
+    const effective = getProteome.output
+      .extend(getProteome.enrichment)
+      .parse({ ...result, ...getEnrichment(ctx) });
+    expect(effective.notice).toBeDefined();
+    expect(effective.notice).toContain('cursor');
   });
 
   it('does not disclose truncation on the last protein page', async () => {

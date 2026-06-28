@@ -152,6 +152,12 @@ export const getProteome = tool('uniprot_get_proteome', {
       .string()
       .optional()
       .describe('Forward cursor for the next protein page. Absent on the last page.'),
+    notice: z
+      .string()
+      .optional()
+      .describe(
+        'Truncation guidance when the protein page was capped — how to reach the rest (walk the cursor or narrow with the query filter).',
+      ),
   },
   errors: [
     {
@@ -160,6 +166,12 @@ export const getProteome = tool('uniprot_get_proteome', {
       when: 'Neither upid nor taxon_id was provided.',
       recovery:
         'Provide a proteome UPID or an NCBI taxon ID; resolve a name first with uniprot_get_taxonomy.',
+    },
+    {
+      reason: 'conflicting_identifier',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'Both upid and taxon_id were provided.',
+      recovery: 'Provide only one of upid or taxon_id, not both, then retry.',
     },
     {
       reason: 'not_found',
@@ -174,6 +186,11 @@ export const getProteome = tool('uniprot_get_proteome', {
     const upid = input.upid?.trim() || undefined;
     if (!upid && !input.taxon_id) {
       throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
+    }
+    if (upid && input.taxon_id) {
+      throw ctx.fail('conflicting_identifier', undefined, {
+        ...ctx.recoveryFor('conflicting_identifier'),
+      });
     }
 
     const service = getUniProtService();

@@ -84,6 +84,30 @@ describe('mapIds start path', () => {
     expect(result).toEqual(expect.schemaMatching(mapIds.output));
   });
 
+  it('declares unmapped ids/mapped count so they reach content[], not only the store', async () => {
+    // Parity guard: the follow-up metadata must be declared in the enrichment block
+    // (unmappedIds also carries an enrichmentTrailer renderer), or the effective-output
+    // parse strips it from both structuredContent and the content[] trailer — leaving
+    // text-only clients unaware which inputs failed to map.
+    mapIdsMock.mockResolvedValue({
+      status: 'finished',
+      results: [{ from: 'TP53', to: 'P04637' }],
+    } satisfies IdMappingResult);
+    const ctx = createMockContext({ errors: mapIds.errors });
+    const input = mapIds.input.parse({
+      from_db: 'Gene_Name',
+      to_db: 'UniProtKB-Swiss-Prot',
+      ids: ['TP53', 'NOSUCHGENEUNIPROT'],
+    });
+
+    const result = await mapIds.handler(input, ctx);
+    const effective = mapIds.output
+      .extend(mapIds.enrichment)
+      .parse({ ...result, ...getEnrichment(ctx) });
+    expect(effective.mappedCount).toBe(1);
+    expect(effective.unmappedIds).toEqual(['NOSUCHGENEUNIPROT']);
+  });
+
   it('returns a running ticket when the inline budget is exceeded (poll-again, not an error)', async () => {
     mapIdsMock.mockResolvedValue({
       status: 'running',
