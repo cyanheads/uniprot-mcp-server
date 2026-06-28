@@ -49,15 +49,52 @@ describe('entryResource', () => {
     expect(() => entryResource.params.parse({ accession: 'lowercase' })).toThrow();
   });
 
-  it('returns the curated entry for a valid accession', async () => {
+  it('returns the full curated entry for an accession within the outline budget', async () => {
     getEntriesMock.mockResolvedValue([p53]);
     const ctx = createMockContext({ errors: entryResource.errors });
     const params = entryResource.params.parse({ accession: 'P04637' });
 
-    const result = await entryResource.handler(params, ctx);
+    const result = (await entryResource.handler(params, ctx)) as Record<string, unknown>;
     expect(getEntriesMock).toHaveBeenCalledWith(['P04637'], undefined, ctx);
     expect(result.accession).toBe('P04637');
     expect(result.entryName).toBe('P53_HUMAN');
+    // A small entry is returned whole — no outline, full curated sections intact.
+    expect(result.kind).toBeUndefined();
+    expect(result.function).toEqual([{ value: 'Acts as a tumor suppressor.' }]);
+  });
+
+  it('outlines an annotation-heavy entry instead of injecting the full record', async () => {
+    // P04637 serializes to ~360 KB live; a record over the outline budget must come
+    // back as a bounded identity summary + section outline, not the whole payload.
+    const heavyEntry: Entry = {
+      ...p53,
+      variants: Array.from({ length: 3000 }, (_, i) => ({
+        description: `Natural variant number ${i} associated with a phenotype of interest`,
+        location: { start: i + 1, end: i + 1 },
+        original: 'A',
+        variation: 'V',
+        featureId: `VAR_${String(i).padStart(6, '0')}`,
+      })),
+    };
+    getEntriesMock.mockResolvedValue([heavyEntry]);
+    const ctx = createMockContext({ errors: entryResource.errors });
+    const params = entryResource.params.parse({ accession: 'P04637' });
+
+    const result = (await entryResource.handler(params, ctx)) as Record<string, unknown>;
+    expect(result.kind).toBe('outline');
+    // Identity summary is preserved so the outline names the protein it describes.
+    expect(result.accession).toBe('P04637');
+    expect(result.entryName).toBe('P53_HUMAN');
+    // Section outline carries names + serialized byte sizes; the heavy section is listed.
+    const sections = result.sections as Array<{ name: string; bytes: number }>;
+    const variantsSection = sections.find((s) => s.name === 'variants');
+    expect(variantsSection).toBeDefined();
+    expect(variantsSection!.bytes).toBeGreaterThan(1000);
+    // The full high-cardinality section is NOT inlined into the outline.
+    expect(result.variants).toBeUndefined();
+    // Re-call guidance routes to the tool, since the resource URI has no sections arg.
+    expect(result.notice).toContain('uniprot_get_entry');
+    expect(result.notice).toContain('sections');
   });
 
   it('throws ctx.fail("not_found") when the accession is absent from the batch result', async () => {
