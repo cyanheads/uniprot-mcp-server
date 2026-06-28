@@ -11,12 +11,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import {
-  formatOutline,
-  OUTLINE_VARIANT,
-  outlineOnOverflow,
-  selectSections,
-} from '@cyanheads/mcp-ts-core/utils';
+import { outlineOnOverflow, selectSections } from '@cyanheads/mcp-ts-core/utils';
 import type { Entry } from '@/services/uniprot/types.js';
 import { ACCESSION_REGEX } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
@@ -274,34 +269,52 @@ export const getEntry = tool('uniprot_get_entry', {
       ),
   }),
   output: z.object({
-    result: z
-      .discriminatedUnion('kind', [
+    kind: z
+      .enum(['full', 'outline'])
+      .describe(
+        'Result kind. "full": the batch resolved — read succeeded[] and failed[]. "outline": a single record exceeded the context budget and is returned as a section listing — re-call the same accession with sections:[...] to pull specific sections.',
+      ),
+    succeeded: z
+      .array(EntrySchema)
+      .optional()
+      .describe('Entries that resolved successfully. Present when kind is "full".'),
+    failed: z
+      .array(
         z
           .object({
-            kind: z
-              .literal('full')
-              .describe('Discriminator: a full (or section-projected) batch result.'),
-            succeeded: z.array(EntrySchema).describe('Entries that resolved successfully.'),
-            failed: z
-              .array(
-                z
-                  .object({
-                    accession: z.string().describe('The requested accession that did not resolve.'),
-                    error: z.string().describe('Why it failed and how to recover.'),
-                  })
-                  .describe('A per-accession failure.'),
-              )
-              .describe('Accessions that were well-formed but not found in UniProtKB.'),
+            accession: z.string().describe('The requested accession that did not resolve.'),
+            error: z.string().describe('Why it failed and how to recover.'),
           })
-          .describe('Full batch result with per-accession success/failure split.'),
-        OUTLINE_VARIANT.describe(
-          'Section outline returned when a single record exceeds the context budget. Re-call with sections:[...] to retrieve specific sections.',
-        ),
-      ])
+          .describe('A per-accession failure.'),
+      )
+      .optional()
       .describe(
-        'Either the full batch result (kind: "full") or a section outline (kind: "outline") for an oversized single record.',
+        'Accessions that were well-formed but not found in UniProtKB. Present when kind is "full".',
+      ),
+    sections: z
+      .array(
+        z
+          .object({
+            name: z
+              .string()
+              .describe('Section identifier — pass a subset in sections:[...] to retrieve it.'),
+            bytes: z.number().describe('Serialized byte size of the section.'),
+          })
+          .describe('An outlined section with its serialized size.'),
+      )
+      .optional()
+      .describe(
+        'Section outline returned when a single record exceeds the context budget. Present when kind is "outline".',
       ),
   }),
+  enrichment: {
+    notice: z
+      .string()
+      .optional()
+      .describe(
+        'Re-call guidance when kind is "outline" — re-call the same accession with sections:[...] to pull specific sections.',
+      ),
+  },
   errors: [
     {
       reason: 'all_not_found',
@@ -360,9 +373,7 @@ export const getEntry = tool('uniprot_get_entry', {
             ],
           },
         );
-        return {
-          result: { kind: 'full' as const, succeeded: [projected as unknown as Entry], failed },
-        };
+        return { kind: 'full' as const, succeeded: [projected as unknown as Entry], failed };
       }
       const outcome = outlineOnOverflow(entry as unknown as Record<string, unknown>);
       if (outcome.kind === 'outline') {
@@ -370,7 +381,8 @@ export const getEntry = tool('uniprot_get_entry', {
           accession: entry.accession,
           sections: outcome.sections.length,
         });
-        return { result: outcome };
+        if (outcome.notice) ctx.enrich.notice(outcome.notice);
+        return { kind: 'outline' as const, sections: outcome.sections };
       }
     }
 
@@ -380,22 +392,18 @@ export const getEntry = tool('uniprot_get_entry', {
         failed: failed.length,
       });
     }
-    return { result: { kind: 'full' as const, succeeded, failed } };
+    return { kind: 'full' as const, succeeded, failed };
   },
 
-  format: ({ result }) => {
-    if (result.kind === 'outline') {
-      return [
-        {
-          type: 'text',
-          text: `_Result: ${result.kind} — record too large; re-call with sections:[...]._`,
-        },
-        ...formatOutline(result),
-      ];
-    }
-
+  format: (result) => {
     const lines = [`_Result: ${result.kind}_`];
-    for (const e of result.succeeded) {
+
+    if (result.sections?.length) {
+      // Outline arm: a single oversized record returned as a section listing.
+      lines.push('Record too large — re-call with sections:[...] to pull only what you need.');
+      for (const s of result.sections) lines.push(`- **${s.name}** — ${s.bytes} bytes`);
+    }
+    for (const e of result.succeeded ?? []) {
       lines.push(`# ${e.proteinName ?? e.entryName} (${e.accession})`);
       lines.push(`**Entry:** ${e.entryName}`);
       lines.push(
@@ -486,7 +494,7 @@ export const getEntry = tool('uniprot_get_entry', {
       }
       lines.push('');
     }
-    if (result.failed.length) {
+    if (result.failed?.length) {
       lines.push('### Not found');
       for (const f of result.failed) lines.push(`- **${f.accession}** — ${f.error}`);
     }

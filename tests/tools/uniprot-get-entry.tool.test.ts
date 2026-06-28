@@ -10,7 +10,7 @@
  */
 
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/services/uniprot/types.js';
 
@@ -82,11 +82,9 @@ describe('getEntry handler', () => {
     const input = getEntry.input.parse({ accessions: ['P04637', 'P38398'] });
 
     const result = await getEntry.handler(input, ctx);
-    expect(result.result.kind).toBe('full');
-    if (result.result.kind === 'full') {
-      expect(result.result.succeeded).toHaveLength(2);
-      expect(result.result.failed).toHaveLength(0);
-    }
+    expect(result.kind).toBe('full');
+    expect(result.succeeded).toHaveLength(2);
+    expect(result.failed).toHaveLength(0);
     expect(result).toEqual(expect.schemaMatching(getEntry.output));
   });
 
@@ -97,13 +95,11 @@ describe('getEntry handler', () => {
     const input = getEntry.input.parse({ accessions: ['P04637', 'Q99999'] });
 
     const result = await getEntry.handler(input, ctx);
-    expect(result.result.kind).toBe('full');
-    if (result.result.kind === 'full') {
-      expect(result.result.succeeded.map((e) => e.accession)).toEqual(['P04637']);
-      expect(result.result.failed).toHaveLength(1);
-      expect(result.result.failed[0]?.accession).toBe('Q99999');
-      expect(result.result.failed[0]?.error).toContain('not found');
-    }
+    expect(result.kind).toBe('full');
+    expect(result.succeeded?.map((e) => e.accession)).toEqual(['P04637']);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed?.[0]?.accession).toBe('Q99999');
+    expect(result.failed?.[0]?.error).toContain('not found');
     expect(result).toEqual(expect.schemaMatching(getEntry.output));
   });
 
@@ -133,11 +129,11 @@ describe('getEntry handler', () => {
     const input = getEntry.input.parse({ accessions: ['P38398'] });
 
     const result = await getEntry.handler(input, ctx);
-    expect(result.result.kind).toBe('outline');
-    if (result.result.kind === 'outline') {
-      expect(result.result.sections.length).toBeGreaterThan(0);
-      expect(result.result.sections.some((s) => s.name === 'function')).toBe(true);
-    }
+    expect(result.kind).toBe('outline');
+    expect(result.sections?.length).toBeGreaterThan(0);
+    expect(result.sections?.some((s) => s.name === 'function')).toBe(true);
+    // Re-call guidance surfaces through enrichment, not the output payload.
+    expect(getEnrichment(ctx).notice).toBeTruthy();
   });
 
   it('projects only requested sections on a sections re-call (full arm, never outline)', async () => {
@@ -152,23 +148,19 @@ describe('getEntry handler', () => {
     const input = getEntry.input.parse({ accessions: ['P04637'], sections: ['disease'] });
 
     const result = await getEntry.handler(input, ctx);
-    expect(result.result.kind).toBe('full');
-    if (result.result.kind === 'full') {
-      const entry = result.result.succeeded[0]!;
-      // Always-keep identity fields survive; the requested section is kept.
-      expect(entry.accession).toBe('P04637');
-      expect(entry.disease).toBeDefined();
-      // The oversized, unrequested section is dropped by the projection.
-      expect(entry.function).toBeUndefined();
-    }
+    expect(result.kind).toBe('full');
+    const entry = result.succeeded?.[0];
+    // Always-keep identity fields survive; the requested section is kept.
+    expect(entry?.accession).toBe('P04637');
+    expect(entry?.disease).toBeDefined();
+    // The oversized, unrequested section is dropped by the projection.
+    expect(entry?.function).toBeUndefined();
   });
 });
 
 describe('getEntry format', () => {
   it('format() renders the full arm with curated sections and provenance', () => {
-    const blocks = getEntry.format!({
-      result: { kind: 'full', succeeded: [fullEntry], failed: [] },
-    });
+    const blocks = getEntry.format!({ kind: 'full', succeeded: [fullEntry], failed: [] });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
     expect(text).toContain('P04637');
     expect(text).toContain('P53_HUMAN');
@@ -192,7 +184,7 @@ describe('getEntry format', () => {
       annotationScore: 1,
       proteinExistence: '4: Predicted',
     };
-    const blocks = getEntry.format!({ result: { kind: 'full', succeeded: [sparse], failed: [] } });
+    const blocks = getEntry.format!({ kind: 'full', succeeded: [sparse], failed: [] });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
     expect(text).toContain('A0A0A0A0A0');
     expect(text).toContain('Unreviewed (TrEMBL)');
@@ -203,13 +195,9 @@ describe('getEntry format', () => {
 
   it('format() renders per-accession failures alongside successes', () => {
     const blocks = getEntry.format!({
-      result: {
-        kind: 'full',
-        succeeded: [fullEntry],
-        failed: [
-          { accession: 'A0A0A0A0A0', error: 'Accession A0A0A0A0A0 not found in UniProtKB.' },
-        ],
-      },
+      kind: 'full',
+      succeeded: [fullEntry],
+      failed: [{ accession: 'A0A0A0A0A0', error: 'Accession A0A0A0A0A0 not found in UniProtKB.' }],
     });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
     expect(text).toContain('Not found');
@@ -218,14 +206,11 @@ describe('getEntry format', () => {
 
   it('format() renders the outline arm', () => {
     const blocks = getEntry.format!({
-      result: {
-        kind: 'outline',
-        sections: [
-          { name: 'function', bytes: 4000 },
-          { name: 'variants', bytes: 12000 },
-        ],
-        notice: 'Record too large. Re-call with sections.',
-      },
+      kind: 'outline',
+      sections: [
+        { name: 'function', bytes: 4000 },
+        { name: 'variants', bytes: 12000 },
+      ],
     });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
     expect(text).toContain('outline');
