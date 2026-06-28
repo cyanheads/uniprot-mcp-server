@@ -1,6 +1,6 @@
 {
   "name": "@cyanheads/uniprot-mcp-server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "mcpName": "io.github.cyanheads/uniprot-mcp-server",
   "description": "Search UniProtKB by protein function, fetch curated records, map IDs across databases, and pull reference proteomes, taxonomy, and sequences via MCP. STDIO or Streamable HTTP.",
   "type": "module",
