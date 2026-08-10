@@ -2,6 +2,7 @@
   "manifest_version": "0.3",
   "name": "uniprot-mcp-server",
   "version": "0.2.1",
+  "license": "Apache-2.0",
   "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
   "author": { "name": "cyanheads" },
   "repository": {
