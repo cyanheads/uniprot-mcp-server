@@ -7,6 +7,12 @@
     "source": "github"
   },
   "version": "0.2.1",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://uniprot.caseyjhand.com/mcp"
+    }
+  ],
   "packages": [
     {
       "registryType": "npm",

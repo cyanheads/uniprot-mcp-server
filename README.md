@@ -19,6 +19,12 @@
 
 </div>
 
+<div align="center">
+
+**Public Hosted Server:** [https://uniprot.caseyjhand.com/mcp](https://uniprot.caseyjhand.com/mcp)
+
+</div>
+
 ---
 
 ## Tools
@@ -137,6 +143,23 @@ Agent-friendly output:
 - Sparsity preserved — absent upstream fields stay absent, never fabricated (most curated sections are legitimately missing on TrEMBL entries)
 
 ## Getting started
+
+### Public Hosted Instance
+
+A public instance is available at `https://uniprot.caseyjhand.com/mcp` — no installation required. Point any MCP client at it via Streamable HTTP:
+
+```json
+{
+  "mcpServers": {
+    "uniprot-mcp-server": {
+      "type": "streamable-http",
+      "url": "https://uniprot.caseyjhand.com/mcp"
+    }
+  }
+}
+```
+
+### Self-Hosted / Local
 
 Add the following to your MCP client configuration file. UniProt REST is keyless — no API key required.
 
