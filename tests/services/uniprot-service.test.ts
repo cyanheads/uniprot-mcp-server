@@ -13,6 +13,7 @@
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { expectMcpError } from '../helpers.js';
 
 const fetchWithTimeoutMock = vi.fn();
 
@@ -65,8 +66,7 @@ describe('UniProtService — error classification', () => {
         { statusCode: 404 },
       ),
     );
-    const err = await service.getTaxonById(99999999, ctx()).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(service.getTaxonById(99999999, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.message).toBe('No taxonomy record for taxon ID 99999999.');
     expect(err.message).not.toMatch(/Status: 404|rest\.uniprot\.org/);
@@ -81,7 +81,7 @@ describe('UniProtService — error classification', () => {
         { statusCode: 404 },
       ),
     );
-    const err = await service.getFasta('Q6ZZZ9', false, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.getFasta('Q6ZZZ9', false, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.message).toBe('No sequence found for accession Q6ZZZ9.');
     expect(err.message).not.toMatch(/Status: 404|rest\.uniprot\.org/);
@@ -90,15 +90,13 @@ describe('UniProtService — error classification', () => {
 
   it('throws notFound when no proteome matches the query', async () => {
     fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: [] }));
-    const err = await service.getProteome({ taxonId: 99999999 }, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.getProteome({ taxonId: 99999999 }, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
   });
 
   it('throws notFound (by name) when the taxonomy search is empty', async () => {
     fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: [] }));
-    const err = await service
-      .getTaxonByName('Nonexistus organismus', ctx())
-      .catch((e) => e as McpError);
+    const err = await expectMcpError(service.getTaxonByName('Nonexistus organismus', ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ name: 'Nonexistus organismus' });
   });
@@ -107,8 +105,7 @@ describe('UniProtService — error classification', () => {
     fetchWithTimeoutMock.mockResolvedValue(
       jsonResponse('<!DOCTYPE html><html><body>maintenance</body></html>'),
     );
-    const err = await service.search('gene:TP53', {}, ctx()).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(service.search('gene:TP53', {}, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
   });
 });
@@ -160,7 +157,7 @@ describe('UniProtService — upstream-error leak prevention', () => {
     fetchWithTimeoutMock.mockRejectedValue(
       frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503),
     );
-    const err = await service.search('gene:TP53', {}, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.search('gene:TP53', {}, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.ServiceUnavailable); // classification preserved
     assertLeakFree(err);
     // The original is retained as cause for server-side logs only (never serialized to the client).
@@ -169,14 +166,14 @@ describe('UniProtService — upstream-error leak prevention', () => {
 
   it('search: a 429 RateLimited is re-thrown clean', async () => {
     fetchWithTimeoutMock.mockRejectedValue(frameworkError(JsonRpcErrorCode.RateLimited, 429));
-    const err = await service.search('gene:TP53', {}, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.search('gene:TP53', {}, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.RateLimited);
     assertLeakFree(err);
   });
 
   it('getEntries: a 500 InternalError is re-thrown clean', async () => {
     fetchWithTimeoutMock.mockRejectedValue(frameworkError(JsonRpcErrorCode.InternalError, 500));
-    const err = await service.getEntries(['P04637'], undefined, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.getEntries(['P04637'], undefined, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.InternalError);
     assertLeakFree(err);
   });
@@ -185,7 +182,7 @@ describe('UniProtService — upstream-error leak prevention', () => {
     fetchWithTimeoutMock.mockRejectedValue(
       frameworkError(JsonRpcErrorCode.ServiceUnavailable, 502),
     );
-    const err = await service.getProteome({ taxonId: 9606 }, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.getProteome({ taxonId: 9606 }, ctx()));
     assertLeakFree(err);
   });
 
@@ -193,14 +190,14 @@ describe('UniProtService — upstream-error leak prevention', () => {
     fetchWithTimeoutMock.mockRejectedValue(
       frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503),
     );
-    const err = await service.getTaxonById(9606, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.getTaxonById(9606, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
     assertLeakFree(err);
   });
 
   it('getFasta: a non-404 (429) is re-thrown clean, not just 404', async () => {
     fetchWithTimeoutMock.mockRejectedValue(frameworkError(JsonRpcErrorCode.RateLimited, 429));
-    const err = await service.getFasta('P04637', false, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.getFasta('P04637', false, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.RateLimited);
     assertLeakFree(err);
   });
@@ -209,9 +206,9 @@ describe('UniProtService — upstream-error leak prevention', () => {
     fetchWithTimeoutMock.mockRejectedValue(
       frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503),
     );
-    const err = await service
-      .mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx())
-      .catch((e) => e as McpError);
+    const err = await expectMcpError(
+      service.mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx()),
+    );
     assertLeakFree(err);
   });
 
@@ -221,9 +218,9 @@ describe('UniProtService — upstream-error leak prevention', () => {
       .mockResolvedValueOnce(jsonResponse({ jobId: 'job-1' }))
       // GET /idmapping/status/job-1 → 503 framework error
       .mockRejectedValueOnce(frameworkError(JsonRpcErrorCode.ServiceUnavailable, 503));
-    const err = await service
-      .mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx())
-      .catch((e) => e as McpError);
+    const err = await expectMcpError(
+      service.mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx()),
+    );
     assertLeakFree(err);
   });
 
@@ -237,7 +234,7 @@ describe('UniProtService — upstream-error leak prevention', () => {
         errorSource: 'FetchTimeout',
       }),
     );
-    const err = await service.search('gene:TP53', {}, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.search('gene:TP53', {}, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.Timeout);
     assertLeakFree(err);
   });
@@ -246,9 +243,7 @@ describe('UniProtService — upstream-error leak prevention', () => {
     // The service's own notFound carries only { name } — no leaky keys — so it must
     // pass through unchanged (message and safe data intact).
     fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: [] }));
-    const err = await service
-      .getTaxonByName('Nonexistus organismus', ctx())
-      .catch((e) => e as McpError);
+    const err = await expectMcpError(service.getTaxonByName('Nonexistus organismus', ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.message).toBe('No taxonomy record matched the name "Nonexistus organismus".');
     expect(err.data).toMatchObject({ name: 'Nonexistus organismus' });
@@ -405,7 +400,7 @@ describe('UniProtService — FASTA parsing', () => {
 
   it('throws notFound when the FASTA body parses to zero records (empty body)', async () => {
     fetchWithTimeoutMock.mockResolvedValue(jsonResponse(''));
-    const err = await service.getFasta('P04637', false, ctx()).catch((e) => e as McpError);
+    const err = await expectMcpError(service.getFasta('P04637', false, ctx()));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
   });
 });
@@ -487,9 +482,9 @@ describe('UniProtService — ID mapping loop', () => {
     fetchWithTimeoutMock.mockResolvedValueOnce(
       jsonResponse({ messages: ['Invalid from/to combination'] }),
     );
-    const err = await service
-      .mapIds('PomBase', 'WormBase_Protein', ['x'], undefined, ctx())
-      .catch((e) => e as McpError);
+    const err = await expectMcpError(
+      service.mapIds('PomBase', 'WormBase_Protein', ['x'], undefined, ctx()),
+    );
     expect(err.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
     expect(err.message).toContain('Invalid from/to combination');
   });

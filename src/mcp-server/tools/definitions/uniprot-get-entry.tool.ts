@@ -353,8 +353,8 @@ export const getEntry = tool('uniprot_get_entry', {
     }
 
     // Single-record overflow path: outline a fat record so the agent re-calls with sections:[...].
-    if (succeeded.length === 1 && failed.length === 0) {
-      const entry = succeeded[0]!;
+    const entry = failed.length === 0 && succeeded.length === 1 ? succeeded[0] : undefined;
+    if (entry) {
       if (input.sections?.length) {
         const projected = selectSections(
           entry as unknown as Record<string, unknown>,
@@ -396,7 +396,7 @@ export const getEntry = tool('uniprot_get_entry', {
   },
 
   format: (result) => {
-    const lines = [`_Result: ${result.kind}_`];
+    const lines = [`**Result kind:** ${result.kind}`];
 
     if (result.sections?.length) {
       // Outline arm: a single oversized record returned as a section listing.

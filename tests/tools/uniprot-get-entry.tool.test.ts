@@ -9,10 +9,11 @@
  * @module tests/tools/uniprot-get-entry.tool.test
  */
 
-import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/services/uniprot/types.js';
+import { expectMcpError } from '../helpers.js';
 
 const getEntriesMock = vi.fn();
 
@@ -108,8 +109,7 @@ describe('getEntry handler', () => {
     const ctx = createMockContext({ errors: getEntry.errors });
     const input = getEntry.input.parse({ accessions: ['Q99999', 'Q88888'] });
 
-    const err = await getEntry.handler(input, ctx).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(getEntry.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'all_not_found' });
     expect((err.data as { accessions?: unknown }).accessions).toEqual(['Q99999', 'Q88888']);

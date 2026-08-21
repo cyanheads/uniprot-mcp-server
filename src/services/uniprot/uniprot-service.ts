@@ -194,12 +194,14 @@ export class UniProtService {
     this.timeoutMs = cfg.timeoutMs;
   }
 
-  /** Build a `RequestContext` from the handler `ctx`, correlated for logging. */
+  /**
+   * Build a `RequestContext` for a sub-operation from the handler `ctx`.
+   * `Context extends RequestContext`, so the handler context is the parent
+   * directly — requestId, traceId, tenantId, sessionId, and the `extra`
+   * correlation bag all carry through instead of being hand-picked.
+   */
   private reqCtx(operation: string, ctx: Context): RequestContext {
-    return requestContextService.createRequestContext({
-      operation,
-      parentContext: { requestId: ctx.requestId, ...(ctx.traceId ? { traceId: ctx.traceId } : {}) },
-    });
+    return requestContextService.createRequestContext({ operation, parentContext: ctx });
   }
 
   /** Wrap a fetch+parse pipeline in retry with backoff calibrated for an occasionally rate-limited API. */
@@ -596,7 +598,7 @@ export class UniProtService {
     accession: string,
     includeIsoforms: boolean,
     ctx: Context,
-  ): Promise<SequenceRecord[]> {
+  ): Promise<[SequenceRecord, ...SequenceRecord[]]> {
     const url = includeIsoforms
       ? new URL(`${this.baseUrl}/uniprotkb/search`)
       : new URL(`${this.baseUrl}/uniprotkb/${accession}.fasta`);
@@ -621,11 +623,11 @@ export class UniProtService {
       return sanitizeUpstreamError(err, 'uniprot.getFasta');
     });
 
-    const records = parseFasta(text);
-    if (records.length === 0) {
+    const [canonical, ...rest] = parseFasta(text);
+    if (!canonical) {
       throw notFound(`No sequence found for accession ${accession}.`, { accession });
     }
-    return records;
+    return [canonical, ...rest];
   }
 
   // ---------------------------------------------------------------------------

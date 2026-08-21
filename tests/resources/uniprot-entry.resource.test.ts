@@ -7,10 +7,11 @@
  * @module tests/resources/uniprot-entry.resource.test
  */
 
-import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/services/uniprot/types.js';
+import { expectMcpError, required } from '../helpers.js';
 
 const getEntriesMock = vi.fn();
 
@@ -44,15 +45,17 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+const paramsSchema = required(entryResource.params, 'entryResource.params');
+
 describe('entryResource', () => {
   it('rejects a malformed accession at the param edge', () => {
-    expect(() => entryResource.params.parse({ accession: 'lowercase' })).toThrow();
+    expect(() => paramsSchema.parse({ accession: 'lowercase' })).toThrow();
   });
 
   it('returns the full curated entry for an accession within the outline budget', async () => {
     getEntriesMock.mockResolvedValue([p53]);
     const ctx = createMockContext({ errors: entryResource.errors });
-    const params = entryResource.params.parse({ accession: 'P04637' });
+    const params = paramsSchema.parse({ accession: 'P04637' });
 
     const result = (await entryResource.handler(params, ctx)) as Record<string, unknown>;
     expect(getEntriesMock).toHaveBeenCalledWith(['P04637'], undefined, ctx);
@@ -78,7 +81,7 @@ describe('entryResource', () => {
     };
     getEntriesMock.mockResolvedValue([heavyEntry]);
     const ctx = createMockContext({ errors: entryResource.errors });
-    const params = entryResource.params.parse({ accession: 'P04637' });
+    const params = paramsSchema.parse({ accession: 'P04637' });
 
     const result = (await entryResource.handler(params, ctx)) as Record<string, unknown>;
     expect(result.kind).toBe('outline');
@@ -101,10 +104,9 @@ describe('entryResource', () => {
     // Well-formed accession, but UniProtKB returns no matching entry.
     getEntriesMock.mockResolvedValue([]);
     const ctx = createMockContext({ errors: entryResource.errors });
-    const params = entryResource.params.parse({ accession: 'Q99999' });
+    const params = paramsSchema.parse({ accession: 'Q99999' });
 
-    const err = await entryResource.handler(params, ctx).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(entryResource.handler(params, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'not_found', accession: 'Q99999' });
     expect((err.data as { recovery?: unknown }).recovery).toBeDefined();
@@ -114,7 +116,7 @@ describe('entryResource', () => {
     // A mismatched record must not be returned for the requested accession.
     getEntriesMock.mockResolvedValue([p53]);
     const ctx = createMockContext({ errors: entryResource.errors });
-    const params = entryResource.params.parse({ accession: 'P38398' });
+    const params = paramsSchema.parse({ accession: 'P38398' });
 
     await expect(entryResource.handler(params, ctx)).rejects.toMatchObject({
       data: { reason: 'not_found', accession: 'P38398' },

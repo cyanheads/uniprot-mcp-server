@@ -8,10 +8,11 @@
  * @module tests/tools/uniprot-get-sequence.tool.test
  */
 
-import { JsonRpcErrorCode, McpError, notFound } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, notFound } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SequenceRecord } from '@/services/uniprot/types.js';
+import { expectMcpError } from '../helpers.js';
 
 const getFastaMock = vi.fn();
 
@@ -57,8 +58,7 @@ describe('getSequence', () => {
     const ctx = createMockContext({ errors: getSequence.errors });
     const input = getSequence.input.parse({ accession: 'Q99999' });
 
-    const err = await getSequence.handler(input, ctx).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(getSequence.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'not_found' });
     expect((err.data as { recovery?: unknown }).recovery).toBeDefined();

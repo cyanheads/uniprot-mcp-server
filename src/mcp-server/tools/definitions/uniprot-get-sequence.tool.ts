@@ -67,7 +67,7 @@ export const getSequence = tool('uniprot_get_sequence', {
   ],
 
   async handler(input, ctx) {
-    let records: SequenceRecord[];
+    let records: [SequenceRecord, ...SequenceRecord[]];
     try {
       records = await getUniProtService().getFasta(input.accession, input.include_isoforms, ctx);
     } catch (err) {
@@ -80,8 +80,8 @@ export const getSequence = tool('uniprot_get_sequence', {
     }
 
     // The first record without an isoform-suffixed id (or simply the first) is canonical.
-    const canonicalIdx = records.findIndex((r) => !r.isoformId);
-    const canonical = records[canonicalIdx >= 0 ? canonicalIdx : 0]!;
+    // getFasta's return type guarantees at least one record, so records[0] is total.
+    const canonical = records.find((r) => !r.isoformId) ?? records[0];
     const isoforms = records.flatMap((r) =>
       r !== canonical && r.isoformId
         ? [{ isoformId: r.isoformId, header: r.header, sequence: r.sequence, length: r.length }]

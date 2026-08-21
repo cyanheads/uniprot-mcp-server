@@ -11,6 +11,7 @@
 import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SearchPage } from '@/services/uniprot/types.js';
+import { required } from '../helpers.js';
 
 const searchMock = vi.fn();
 
@@ -137,7 +138,7 @@ describe('searchProteins handler', () => {
 
     const result = await searchProteins.handler(input, ctx);
     const effective = searchProteins.output
-      .extend(searchProteins.enrichment)
+      .extend(required(searchProteins.enrichment, 'searchProteins.enrichment'))
       .parse({ ...result, ...getEnrichment(ctx) });
     expect(effective.totalResults).toBe(4457);
     expect(effective.cursor).toBe('NEXT');
