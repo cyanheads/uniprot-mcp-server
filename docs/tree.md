@@ -1,6 +1,6 @@
 # uniprot-mcp-server - Directory Structure
 
-Generated on: 2026-06-28 04:56:44
+Generated on: 2026-08-21 22:36:25
 
 ```text
 uniprot-mcp-server/
@@ -10,10 +10,14 @@ uniprot-mcp-server/
 │   ├── mcp.json
 │   └── plugin.json
 ├── .github/
-│   └── ISSUE_TEMPLATE/
-│       ├── bug_report.yml
-│       ├── config.yml
-│       └── feature_request.yml
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.yml
+│   │   ├── config.yml
+│   │   └── feature_request.yml
+│   ├── CODE_OF_CONDUCT.md
+│   ├── CONTRIBUTING.md
+│   ├── FUNDING.yml
+│   └── SECURITY.md
 ├── .vscode/
 │   ├── extensions.json
 │   └── settings.json
@@ -157,15 +161,17 @@ uniprot-mcp-server/
 │   │   └── uniprot-taxonomy.resource.test.ts
 │   ├── services/
 │   │   └── uniprot-service.test.ts
-│   └── tools/
-│       ├── uniprot-get-entry.tool.test.ts
-│       ├── uniprot-get-proteome.tool.test.ts
-│       ├── uniprot-get-sequence.tool.test.ts
-│       ├── uniprot-get-taxonomy.tool.test.ts
-│       ├── uniprot-map-ids.tool.test.ts
-│       └── uniprot-search-proteins.tool.test.ts
+│   ├── tools/
+│   │   ├── uniprot-get-entry.tool.test.ts
+│   │   ├── uniprot-get-proteome.tool.test.ts
+│   │   ├── uniprot-get-sequence.tool.test.ts
+│   │   ├── uniprot-get-taxonomy.tool.test.ts
+│   │   ├── uniprot-map-ids.tool.test.ts
+│   │   └── uniprot-search-proteins.tool.test.ts
+│   └── helpers.ts
 ├── .dockerignore
 ├── .env.example
+├── .gitattributes
 ├── .gitignore
 ├── .mcpbignore
 ├── AGENTS.md
@@ -173,6 +179,7 @@ uniprot-mcp-server/
 ├── bun.lock
 ├── bunfig.toml
 ├── CHANGELOG.md
+├── CITATION.cff
 ├── CLAUDE.md
 ├── devcheck.config.json
 ├── Dockerfile

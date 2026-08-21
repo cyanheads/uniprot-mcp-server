@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.2](changelog/0.2.x/0.2.2.md) — 2026-08-21
+
+Eight typed contract errors move from InvalidParams (-32602) to ValidationError (-32007), and the framework bump to mcp-ts-core ^0.12.3 tightens the wire: tool inputs reject undeclared argument keys, the advertised outputSchema declares the error envelope, and schemas emit as JSON Schema 2020-12.
+
 ## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-06-28
 
 Fixes uniprot_get_proteome's truncation notice so paging guidance survives into content[] for text-only clients, rejects conflicting identifiers on uniprot_get_proteome and uniprot_get_taxonomy, and outlines annotation-heavy uniprot://entry records instead of injecting the full payload.
