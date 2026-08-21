@@ -8,10 +8,11 @@
  * @module tests/tools/uniprot-get-taxonomy.tool.test
  */
 
-import { JsonRpcErrorCode, McpError, notFound } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, notFound } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Taxon, TaxonChild } from '@/services/uniprot/types.js';
+import { expectMcpError } from '../helpers.js';
 
 const getTaxonByIdMock = vi.fn();
 const getTaxonByNameMock = vi.fn();
@@ -50,7 +51,7 @@ describe('getTaxonomy', () => {
     const ctx = createMockContext({ errors: getTaxonomy.errors });
     const input = getTaxonomy.input.parse({});
     await expect(getTaxonomy.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'missing_identifier' },
     });
     expect(getTaxonByIdMock).not.toHaveBeenCalled();
@@ -72,7 +73,7 @@ describe('getTaxonomy', () => {
     const ctx = createMockContext({ errors: getTaxonomy.errors });
     const input = getTaxonomy.input.parse({ taxon_id: 9606, name: 'Mus musculus' });
     await expect(getTaxonomy.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'conflicting_identifier' },
     });
     expect(getTaxonByIdMock).not.toHaveBeenCalled();
@@ -98,8 +99,7 @@ describe('getTaxonomy', () => {
     const ctx = createMockContext({ errors: getTaxonomy.errors });
     const input = getTaxonomy.input.parse({ taxon_id: 99999999 });
 
-    const err = await getTaxonomy.handler(input, ctx).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(getTaxonomy.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'not_found' });
     expect((err.data as { recovery?: unknown }).recovery).toBeDefined();
@@ -112,7 +112,7 @@ describe('getTaxonomy', () => {
     const ctx = createMockContext({ errors: getTaxonomy.errors });
     const input = getTaxonomy.input.parse({ name: 'Nonexistus organismus' });
 
-    const err = await getTaxonomy.handler(input, ctx).catch((e) => e as McpError);
+    const err = await expectMcpError(getTaxonomy.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'not_found' });
     expect(getTaxonByNameMock).toHaveBeenCalledWith('Nonexistus organismus', ctx);

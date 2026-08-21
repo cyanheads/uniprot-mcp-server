@@ -162,14 +162,14 @@ export const getProteome = tool('uniprot_get_proteome', {
   errors: [
     {
       reason: 'missing_identifier',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Neither upid nor taxon_id was provided.',
       recovery:
         'Provide a proteome UPID or an NCBI taxon ID; resolve a name first with uniprot_get_taxonomy.',
     },
     {
       reason: 'conflicting_identifier',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Both upid and taxon_id were provided.',
       recovery: 'Provide only one of upid or taxon_id, not both, then retry.',
     },
@@ -184,19 +184,21 @@ export const getProteome = tool('uniprot_get_proteome', {
 
   async handler(input, ctx) {
     const upid = input.upid?.trim() || undefined;
-    if (!upid && !input.taxon_id) {
-      throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
-    }
     if (upid && input.taxon_id) {
       throw ctx.fail('conflicting_identifier', undefined, {
         ...ctx.recoveryFor('conflicting_identifier'),
       });
     }
+    // Narrowed union: exactly one identifier survives the guards and reaches the service.
+    const target = upid ? { upid } : input.taxon_id ? { taxonId: input.taxon_id } : undefined;
+    if (!target) {
+      throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
+    }
 
     const service = getUniProtService();
     let proteome: Awaited<ReturnType<typeof service.getProteome>>;
     try {
-      proteome = await service.getProteome(upid ? { upid } : { taxonId: input.taxon_id! }, ctx);
+      proteome = await service.getProteome(target, ctx);
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw ctx.fail('not_found', err.message, {

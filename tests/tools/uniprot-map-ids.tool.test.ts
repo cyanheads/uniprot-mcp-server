@@ -12,6 +12,7 @@ import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IdMappingResult } from '@/services/uniprot/types.js';
+import { expectMcpError, expectRejection, required } from '../helpers.js';
 
 const mapIdsMock = vi.fn();
 const resumeMappingMock = vi.fn();
@@ -102,7 +103,7 @@ describe('mapIds start path', () => {
 
     const result = await mapIds.handler(input, ctx);
     const effective = mapIds.output
-      .extend(mapIds.enrichment)
+      .extend(required(mapIds.enrichment, 'mapIds.enrichment'))
       .parse({ ...result, ...getEnrichment(ctx) });
     expect(effective.mappedCount).toBe(1);
     expect(effective.unmappedIds).toEqual(['NOSUCHGENEUNIPROT']);
@@ -157,9 +158,8 @@ describe('mapIds start path', () => {
       ids: ['SPBC1234.05'],
     });
 
-    const err = await mapIds.handler(input, ctx).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
-    expect(err.code).toBe(JsonRpcErrorCode.InvalidParams);
+    const err = await expectMcpError(mapIds.handler(input, ctx));
+    expect(err.code).toBe(JsonRpcErrorCode.ValidationError);
     expect(err.data).toMatchObject({ reason: 'unsupported_db_pair' });
     expect(err.message).not.toMatch(/Status: 400|rest\.uniprot\.org/);
   });
@@ -173,7 +173,7 @@ describe('mapIds start path', () => {
       ids: ['TP53'],
     });
 
-    const err = await mapIds.handler(input, ctx).catch((e) => e as Error);
+    const err = await expectRejection(mapIds.handler(input, ctx));
     expect(err.message).toContain('socket hang up');
     expect((err as McpError).data?.reason).toBeUndefined();
   });
@@ -222,8 +222,7 @@ describe('mapIds resume path', () => {
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({ ticket: 'stale-job' });
 
-    const err = await mapIds.handler(input, ctx).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(mapIds.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'invalid_ticket' });
     expect(err.message).not.toMatch(/Status: 404|rest\.uniprot\.org/);

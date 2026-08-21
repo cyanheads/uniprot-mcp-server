@@ -165,34 +165,29 @@ export const searchProteins = tool('uniprot_search_proteins', {
   errors: [
     {
       reason: 'missing_query',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Neither text_search nor query was provided.',
       recovery: 'Provide either text_search for plain language or query for Lucene field syntax.',
     },
     {
       reason: 'conflicting_query',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Both text_search and query were provided.',
       recovery: 'Provide only one of text_search or query, not both, then retry.',
     },
   ],
 
   async handler(input, ctx) {
-    const hasText = !!input.text_search?.trim();
-    const hasQuery = !!input.query?.trim();
-    if (!hasText && !hasQuery) {
+    const textSearch = input.text_search?.trim() ?? '';
+    const luceneQuery = input.query?.trim() ?? '';
+    if (!textSearch && !luceneQuery) {
       throw ctx.fail('missing_query', undefined, { ...ctx.recoveryFor('missing_query') });
     }
-    if (hasText && hasQuery) {
+    if (textSearch && luceneQuery) {
       throw ctx.fail('conflicting_query', undefined, { ...ctx.recoveryFor('conflicting_query') });
     }
 
-    const clauses: string[] = [];
-    if (hasQuery) {
-      clauses.push(input.query!.trim());
-    } else {
-      clauses.push(input.text_search!.trim());
-    }
+    const clauses: string[] = [luceneQuery || textSearch];
     if (input.organism_id) clauses.push(`organism_id:${input.organism_id}`);
     // Honor reviewed unless the caller already pinned a reviewed: clause in their query.
     if (!/\breviewed:/i.test(clauses.join(' '))) {

@@ -8,10 +8,11 @@
  * @module tests/tools/uniprot-get-proteome.tool.test
  */
 
-import { JsonRpcErrorCode, McpError, notFound } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, notFound } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Proteome, ProteomeProteinPage } from '@/services/uniprot/types.js';
+import { expectMcpError, required } from '../helpers.js';
 
 const getProteomeMock = vi.fn();
 const getProteomeProteinsMock = vi.fn();
@@ -57,7 +58,7 @@ describe('getProteome', () => {
     const ctx = createMockContext({ errors: getProteome.errors });
     const input = getProteome.input.parse({});
     await expect(getProteome.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'missing_identifier' },
     });
     expect(getProteomeMock).not.toHaveBeenCalled();
@@ -78,7 +79,7 @@ describe('getProteome', () => {
     const ctx = createMockContext({ errors: getProteome.errors });
     const input = getProteome.input.parse({ upid: 'UP000005640', taxon_id: 10090 });
     await expect(getProteome.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'conflicting_identifier' },
     });
     expect(getProteomeMock).not.toHaveBeenCalled();
@@ -103,8 +104,7 @@ describe('getProteome', () => {
     const ctx = createMockContext({ errors: getProteome.errors });
     const input = getProteome.input.parse({ taxon_id: 99999999 });
 
-    const err = await getProteome.handler(input, ctx).catch((e) => e as McpError);
-    expect(err).toBeInstanceOf(McpError);
+    const err = await expectMcpError(getProteome.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'not_found' });
     // Recovery guidance reaches the wire so the agent knows its next move.
@@ -201,7 +201,7 @@ describe('getProteome', () => {
     // The effective output the framework builds (output + enrichment) — what both
     // structuredContent and the content[] trailer are rendered from.
     const effective = getProteome.output
-      .extend(getProteome.enrichment)
+      .extend(required(getProteome.enrichment, 'getProteome.enrichment'))
       .parse({ ...result, ...getEnrichment(ctx) });
     expect(effective.notice).toBeDefined();
     expect(effective.notice).toContain('cursor');

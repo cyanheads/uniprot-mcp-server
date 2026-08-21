@@ -94,13 +94,13 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
   errors: [
     {
       reason: 'missing_identifier',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Neither taxon_id nor name was provided.',
       recovery: 'Provide an NCBI taxon ID or a scientific name to resolve.',
     },
     {
       reason: 'conflicting_identifier',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Both taxon_id and name were provided.',
       recovery: 'Provide only one of taxon_id or name, not both, then retry.',
     },
@@ -114,21 +114,24 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
 
   async handler(input, ctx) {
     const name = input.name?.trim();
-    if (!input.taxon_id && !name) {
-      throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
-    }
     if (input.taxon_id && name) {
       throw ctx.fail('conflicting_identifier', undefined, {
         ...ctx.recoveryFor('conflicting_identifier'),
       });
     }
+    // Narrowed union: exactly one identifier survives the guards and reaches the service.
+    const target = input.taxon_id ? { taxonId: input.taxon_id } : name ? { name } : undefined;
+    if (!target) {
+      throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
+    }
 
     const service = getUniProtService();
     let taxon: Awaited<ReturnType<typeof service.getTaxonById>>;
     try {
-      taxon = input.taxon_id
-        ? await service.getTaxonById(input.taxon_id, ctx)
-        : await service.getTaxonByName(name!, ctx);
+      taxon =
+        'taxonId' in target
+          ? await service.getTaxonById(target.taxonId, ctx)
+          : await service.getTaxonByName(target.name, ctx);
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw ctx.fail('not_found', err.message, {

@@ -101,13 +101,13 @@ export const mapIds = tool('uniprot_map_ids', {
   errors: [
     {
       reason: 'missing_inputs',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'Neither a ticket nor the full from_db/to_db/ids triple was provided.',
       recovery: 'Provide from_db, to_db, and ids to start a job, or a ticket alone to resume one.',
     },
     {
       reason: 'unsupported_db_pair',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'The from_db/to_db combination is not supported by the ID-mapping service.',
       recovery: 'Check the enum values, or route through UniProtKB as an intermediate database.',
     },

@@ -311,19 +311,21 @@ The Zod schema exposes this as `z.enum([...])` so invalid `from_db`/`to_db` valu
 
 ## Error Contract
 
-Per-tool typed contracts (`errors: [{ reason, code, when, recovery }]`) for the domain failures an agent should plan around. Baseline codes (`ServiceUnavailable`, `Timeout`, `ValidationError`, `InternalError`) bubble freely and aren't declared.
+Per-tool typed contracts (`errors: [{ reason, code, when, recovery }]`) for the domain failures an agent should plan around. Baseline codes (`ServiceUnavailable`, `Timeout`, `InternalError`) bubble freely and aren't declared.
 
 | Tool | reason | code | when |
 |---|---|---|---|
-| `uniprot_search_proteins` | `missing_query` | `InvalidParams` | Neither `text_search` nor `query` provided. Recovery: provide one. |
-| `uniprot_search_proteins` | `conflicting_query` | `InvalidParams` | Both `text_search` and `query` provided. Recovery: pass only one. |
+| `uniprot_search_proteins` | `missing_query` | `ValidationError` | Neither `text_search` nor `query` provided. Recovery: provide one. |
+| `uniprot_search_proteins` | `conflicting_query` | `ValidationError` | Both `text_search` and `query` provided. Recovery: pass only one. |
 | `uniprot_get_entry` | `all_not_found` | `NotFound` | Every accession in the batch is well-formed but unknown to UniProtKB (total failure). Partial failures (some found, some not) surface in `failed[]` in the success result, not as an error. Recovery: verify via `uniprot_search_proteins` or `uniprot_map_ids`. |
-| `uniprot_map_ids` | `missing_inputs` | `InvalidParams` | Neither a resume `ticket` nor the full `from_db`/`to_db`/`ids` triple was provided. Recovery: supply the triple to start a job, or a ticket alone to resume. |
-| `uniprot_map_ids` | `unsupported_db_pair` | `InvalidParams` | `from_db`/`to_db` combination isn't supported by the ID-mapping service (a 400 at submission). Recovery: check the enum; route through `UniProtKB` as an intermediate. |
+| `uniprot_map_ids` | `missing_inputs` | `ValidationError` | Neither a resume `ticket` nor the full `from_db`/`to_db`/`ids` triple was provided. Recovery: supply the triple to start a job, or a ticket alone to resume. |
+| `uniprot_map_ids` | `unsupported_db_pair` | `ValidationError` | `from_db`/`to_db` combination isn't supported by the ID-mapping service (a 400 at submission). Recovery: check the enum; route through `UniProtKB` as an intermediate. |
 | `uniprot_map_ids` | `invalid_ticket` | `NotFound` | The resume ticket is unknown or expired server-side (UniProt holds jobs only temporarily). Recovery: re-submit the original `from_db`/`to_db`/`ids`. |
-| `uniprot_get_proteome` | `missing_identifier` | `InvalidParams` | Neither `upid` nor `taxon_id` provided. Recovery: supply one; resolve a name first with `uniprot_get_taxonomy`. |
+| `uniprot_get_proteome` | `missing_identifier` | `ValidationError` | Neither `upid` nor `taxon_id` provided. Recovery: supply one; resolve a name first with `uniprot_get_taxonomy`. |
+| `uniprot_get_proteome` | `conflicting_identifier` | `ValidationError` | Both `upid` and `taxon_id` provided. Recovery: pass only one. |
 | `uniprot_get_proteome` | `not_found` | `NotFound` | UPID/taxon has no reference proteome. Recovery: confirm the organism has one, or look it up via `uniprot_get_taxonomy`. |
-| `uniprot_get_taxonomy` | `missing_identifier` | `InvalidParams` | Neither `taxon_id` nor `name` provided. Recovery: supply one. |
+| `uniprot_get_taxonomy` | `missing_identifier` | `ValidationError` | Neither `taxon_id` nor `name` provided. Recovery: supply one. |
+| `uniprot_get_taxonomy` | `conflicting_identifier` | `ValidationError` | Both `taxon_id` and `name` provided. Recovery: pass only one. |
 | `uniprot_get_taxonomy` | `not_found` | `NotFound` | Taxon ID/name unresolved. Recovery: check spelling or NCBI taxon ID. |
 | `uniprot_get_sequence` | `not_found` | `NotFound` | The accession has no sequence in UniProtKB. Recovery: verify via `uniprot_search_proteins` or `uniprot_map_ids`. |
 
