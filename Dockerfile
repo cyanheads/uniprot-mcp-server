@@ -3,8 +3,12 @@
 #
 # This stage installs all dependencies (including dev), builds the TypeScript
 # source code into JavaScript, and prepares the production assets.
+#
+# --platform=$BUILDPLATFORM keeps compilation native: multi-arch image builds
+# run the build stage on the host architecture and cross-inject into the target
+# platform's production stage, so an emulated amd64 toolchain never runs here.
 # ==============================================================================
-FROM oven/bun:1.4.0 AS build
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.0 AS build
 
 WORKDIR /usr/src/app
 
