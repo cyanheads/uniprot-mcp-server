@@ -9,22 +9,29 @@
  */
 
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IdMappingResult } from '@/services/uniprot/types.js';
 import { expectMcpError, expectRejection, required } from '../helpers.js';
 
 const mapIdsMock = vi.fn();
 const resumeMappingMock = vi.fn();
+const resumeMappingPageMock = vi.fn();
 
 vi.mock('@/services/uniprot/uniprot-service.js', () => ({
-  getUniProtService: () => ({ mapIds: mapIdsMock, resumeMapping: resumeMappingMock }),
+  getUniProtService: () => ({
+    mapIds: mapIdsMock,
+    resumeMapping: resumeMappingMock,
+    resumeMappingPage: resumeMappingPageMock,
+  }),
 }));
 
 const { mapIds } = await import('@/mcp-server/tools/definitions/uniprot-map-ids.tool.js');
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  mapIdsMock.mockReset();
+  resumeMappingMock.mockReset();
+  resumeMappingPageMock.mockReset();
 });
 
 describe('mapIds validation', () => {
@@ -54,6 +61,31 @@ describe('mapIds validation', () => {
       mapIds.input.parse({ from_db: 'NotADatabase', to_db: 'UniProtKB', ids: ['TP53'] }),
     ).toThrow();
   });
+
+  it('rejects an empty completed-page continuation at the schema edge', () => {
+    expect(() => mapIds.input.parse({ continuation: { jobId: 'job-123', cursor: '' } })).toThrow();
+  });
+
+  it('advertises continuation as an alternative to submission fields', () => {
+    for (const field of ['from_db', 'to_db', 'ids'] as const) {
+      expect(mapIds.input.shape[field].description).toContain('continuation');
+    }
+  });
+
+  it('throws conflicting_inputs when running-job and completed-page resume inputs are mixed', async () => {
+    const ctx = createMockContext({ errors: mapIds.errors });
+    const input = mapIds.input.parse({
+      ticket: 'job-123',
+      continuation: { jobId: 'job-123', cursor: 'cursor-2' },
+    });
+
+    await expect(mapIds.handler(input, ctx)).rejects.toMatchObject({
+      code: JsonRpcErrorCode.ValidationError,
+      data: { reason: 'conflicting_inputs' },
+    });
+    expect(resumeMappingMock).not.toHaveBeenCalled();
+    expect(resumeMappingPageMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('mapIds start path', () => {
@@ -61,6 +93,7 @@ describe('mapIds start path', () => {
     mapIdsMock.mockResolvedValue({
       status: 'finished',
       results: [{ from: 'TP53', to: 'P04637' }],
+      failedIds: ['NOSUCHGENE'],
     } satisfies IdMappingResult);
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({
@@ -93,6 +126,7 @@ describe('mapIds start path', () => {
     mapIdsMock.mockResolvedValue({
       status: 'finished',
       results: [{ from: 'TP53', to: 'P04637' }],
+      failedIds: ['NOSUCHGENEUNIPROT'],
     } satisfies IdMappingResult);
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({
@@ -107,6 +141,66 @@ describe('mapIds start path', () => {
       .parse({ ...result, ...getEnrichment(ctx) });
     expect(effective.mappedCount).toBe(1);
     expect(effective.unmappedIds).toEqual(['NOSUCHGENEUNIPROT']);
+  });
+
+  it('uses upstream failedIds instead of subtracting normalized successful identifiers', async () => {
+    mapIdsMock.mockResolvedValue({
+      status: 'finished',
+      results: [{ from: 'TP53', to: 'P04637' }],
+      failedIds: ['ZZZNOTAREALGENE'],
+    } satisfies IdMappingResult);
+    const input = {
+      from_db: 'Gene_Name' as const,
+      to_db: 'UniProtKB-Swiss-Prot' as const,
+      ids: ['tp53', 'Tp53', 'TP53', 'ZZZNOTAREALGENE'],
+      tax_id: 9606,
+    };
+
+    const contract = await runToolContract(mapIds, input);
+    expect(contract).toMatchObject({
+      structuredContent: {
+        status: 'finished',
+        results: [{ from: 'TP53', to: 'P04637' }],
+        mappedCount: 1,
+        unmappedIds: ['ZZZNOTAREALGENE'],
+      },
+    });
+    const text = contract.content
+      .map((block) => (block.type === 'text' ? block.text : ''))
+      .join('\n');
+    expect(text).toContain('**Unmapped IDs:** ZZZNOTAREALGENE');
+    expect(text).not.toMatch(/Unmapped IDs:.*(?:tp53|Tp53)/);
+  });
+
+  it('returns a completed-page continuation at the 500-row page cap', async () => {
+    const results = Array.from({ length: 500 }, (_, index) => ({
+      from: `GENE${index}`,
+      to: `P${String(index).padStart(5, '0')}`,
+    }));
+    mapIdsMock.mockResolvedValue({
+      status: 'finished',
+      results,
+      failedIds: [],
+      continuation: { jobId: 'job-pages', cursor: 'cursor-2' },
+    } satisfies IdMappingResult);
+
+    const contract = await runToolContract(mapIds, {
+      from_db: 'Gene_Name',
+      to_db: 'UniProtKB-Swiss-Prot',
+      ids: ['GENE0'],
+    });
+    expect(contract).toMatchObject({
+      structuredContent: {
+        status: 'finished',
+        continuation: { jobId: 'job-pages', cursor: 'cursor-2' },
+        mappedCount: 500,
+      },
+    });
+    const text = contract.content
+      .map((block) => (block.type === 'text' ? block.text : ''))
+      .join('\n');
+    expect(text).toContain('cursor-2');
+    expect(text).toContain('job-pages');
   });
 
   it('returns a running ticket when the inline budget is exceeded (poll-again, not an error)', async () => {
@@ -128,7 +222,11 @@ describe('mapIds start path', () => {
   });
 
   it('emits a no-mappings notice when the job finishes empty', async () => {
-    mapIdsMock.mockResolvedValue({ status: 'finished', results: [] } satisfies IdMappingResult);
+    mapIdsMock.mockResolvedValue({
+      status: 'finished',
+      results: [],
+      failedIds: ['NOSUCHGENE'],
+    } satisfies IdMappingResult);
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({
       from_db: 'Gene_Name',
@@ -138,7 +236,8 @@ describe('mapIds start path', () => {
 
     const result = await mapIds.handler(input, ctx);
     expect(result.results).toEqual([]);
-    expect(getEnrichment(ctx).notice).toContain('No Gene_Name IDs mapped');
+    expect(getEnrichment(ctx).notice).toContain('no mappings');
+    expect(getEnrichment(ctx).unmappedIds).toEqual(['NOSUCHGENE']);
   });
 
   it('maps an unsupported db pair (400 from the service) to the unsupported_db_pair contract', async () => {
@@ -184,6 +283,7 @@ describe('mapIds resume path', () => {
     resumeMappingMock.mockResolvedValue({
       status: 'finished',
       results: [{ from: 'TP53', to: 'P04637' }],
+      failedIds: ['ZZZNOTAREALGENE'],
     } satisfies IdMappingResult);
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({ ticket: 'job-123' });
@@ -192,7 +292,10 @@ describe('mapIds resume path', () => {
     expect(resumeMappingMock).toHaveBeenCalledWith('job-123', ctx);
     expect(mapIdsMock).not.toHaveBeenCalled();
     expect(result.status).toBe('finished');
-    expect(getEnrichment(ctx)).toMatchObject({ mappedCount: 1 });
+    expect(getEnrichment(ctx)).toMatchObject({
+      mappedCount: 1,
+      unmappedIds: ['ZZZNOTAREALGENE'],
+    });
   });
 
   it('returns running again when the resumed job is still in progress', async () => {
@@ -229,6 +332,70 @@ describe('mapIds resume path', () => {
   });
 });
 
+describe('mapIds completed-page continuation', () => {
+  it('propagates failed IDs and another continuation without resuming the running-job path', async () => {
+    resumeMappingPageMock.mockResolvedValue({
+      status: 'finished',
+      results: [{ from: 'BRCA1', to: 'P38398' }],
+      failedIds: ['ZZZNOTAREALGENE'],
+      continuation: { jobId: 'job-pages', cursor: 'cursor-3' },
+    } satisfies IdMappingResult);
+    const continuation = { jobId: 'job-pages', cursor: 'cursor-2' };
+
+    const contract = await runToolContract(mapIds, { continuation });
+    expect(resumeMappingPageMock).toHaveBeenCalledWith(continuation, expect.anything());
+    expect(resumeMappingMock).not.toHaveBeenCalled();
+    expect(mapIdsMock).not.toHaveBeenCalled();
+    expect(contract).toMatchObject({
+      structuredContent: {
+        status: 'finished',
+        results: [{ from: 'BRCA1', to: 'P38398' }],
+        continuation: { jobId: 'job-pages', cursor: 'cursor-3' },
+        mappedCount: 1,
+        unmappedIds: ['ZZZNOTAREALGENE'],
+      },
+    });
+    const textBlocks = contract.content.map((block) => (block.type === 'text' ? block.text : ''));
+    expect(textBlocks).toHaveLength(2);
+    expect(textBlocks[0]).toContain('P38398');
+    expect(textBlocks[0]).toContain('cursor-3');
+    expect(textBlocks[1]).toContain('**Unmapped IDs:** ZZZNOTAREALGENE');
+  });
+
+  it('returns an empty terminal page without another continuation', async () => {
+    resumeMappingPageMock.mockResolvedValue({
+      status: 'finished',
+      results: [],
+      failedIds: [],
+    } satisfies IdMappingResult);
+    const ctx = createMockContext({ errors: mapIds.errors });
+
+    const result = await mapIds.handler(
+      mapIds.input.parse({ continuation: { jobId: 'job-pages', cursor: 'past-end' } }),
+      ctx,
+    );
+    expect(result).toEqual({ status: 'finished', results: [] });
+    expect(getEnrichment(ctx).notice).toContain('no mappings');
+  });
+
+  it('maps an unknown or expired completed-page continuation to invalid_continuation', async () => {
+    resumeMappingPageMock.mockRejectedValue(
+      new McpError(JsonRpcErrorCode.NotFound, 'Mapping page not found.'),
+    );
+    const ctx = createMockContext({ errors: mapIds.errors });
+
+    const err = await expectMcpError(
+      mapIds.handler(
+        mapIds.input.parse({ continuation: { jobId: 'expired-job', cursor: 'expired' } }),
+        ctx,
+      ),
+    );
+    expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+    expect(err.data).toMatchObject({ reason: 'invalid_continuation' });
+    expect(err.data?.recovery).toBeDefined();
+  });
+});
+
 describe('mapIds format', () => {
   it('format() renders the finished result as a from→to table', () => {
     const blocks = mapIds.format!({
@@ -243,6 +410,19 @@ describe('mapIds format', () => {
     expect(text).toContain('TP53');
     expect(text).toContain('P04637');
     expect(text).toContain('P38398');
+  });
+
+  it('format() renders a completed-page continuation separately from a running ticket', () => {
+    const blocks = mapIds.format!({
+      status: 'finished',
+      results: [{ from: 'TP53', to: 'P04637' }],
+      continuation: { jobId: 'job-pages', cursor: 'cursor-2' },
+    });
+    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
+    expect(text).toContain('Next page');
+    expect(text).toContain('job-pages');
+    expect(text).toContain('cursor-2');
+    expect(text).not.toContain('**Ticket:**');
   });
 
   it('format() renders the running result with its ticket', () => {

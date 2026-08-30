@@ -13,23 +13,30 @@ import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { ID_MAPPING_FROM_DBS, ID_MAPPING_TO_DBS } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
+const MappingContinuationSchema = z
+  .object({
+    jobId: z.string().min(1).describe('UniProt ID-mapping job identifier for the completed job.'),
+    cursor: z.string().min(1).describe('Opaque cursor for the next completed results page.'),
+  })
+  .describe('Continuation for the next page of an already-completed mapping job.');
+
 export const mapIds = tool('uniprot_map_ids', {
   title: 'uniprot-mcp-server: map IDs',
   description:
-    'Translate identifiers across databases via UniProt\'s ID-mapping service — gene names to accessions, accession to PDB / Ensembl / RefSeq / ChEMBL / GeneID, and back. The job runs asynchronously; this tool submits it and polls within a budget. If it finishes in time you get status "finished" with the mappings; if it runs long you get status "running" with a ticket — re-call with that ticket (and no other inputs) to fetch the result without re-submitting. A gene name often maps to one reviewed Swiss-Prot accession plus dozens of unreviewed TrEMBL ones, so target UniProtKB-Swiss-Prot (reviewed only) for the usual intent, or UniProtKB / UniProtKB_AC-ID to include TrEMBL. Pair a gene-symbol from_db with tax_id to disambiguate species. Chain the resulting accessions into uniprot_get_entry.',
+    'Translate identifiers across databases via UniProt\'s ID-mapping service — gene names to accessions, accession to PDB / Ensembl / RefSeq / ChEMBL / GeneID, and back. The job runs asynchronously; this tool submits it and polls within a budget. A running job returns status "running" with a ticket; pass that ticket alone to poll the same job. A completed call returns status "finished" with one results page; when continuation is present, pass it alone to fetch the next completed page without re-submitting or polling the job. A gene name often maps to one reviewed Swiss-Prot accession plus dozens of unreviewed TrEMBL ones, so target UniProtKB-Swiss-Prot (reviewed only) for the usual intent, or UniProtKB / UniProtKB_AC-ID to include TrEMBL. Pair a gene-symbol from_db with tax_id to disambiguate species. Chain the resulting accessions into uniprot_get_entry.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     from_db: z
       .enum(ID_MAPPING_FROM_DBS)
       .optional()
       .describe(
-        'Source database. Gene_Name = HGNC symbol (pair with tax_id); UniProtKB_AC-ID = accession or entry name; Ensembl/Ensembl_Protein = ENSG/ENSP; PDB; RefSeq_Nucleotide/RefSeq_Protein = NM_/NP_; ChEMBL; GeneID = NCBI Gene. Required unless resuming with a ticket.',
+        'Source database. Gene_Name = HGNC symbol (pair with tax_id); UniProtKB_AC-ID = accession or entry name; Ensembl/Ensembl_Protein = ENSG/ENSP; PDB; RefSeq_Nucleotide/RefSeq_Protein = NM_/NP_; ChEMBL; GeneID = NCBI Gene. Required only when submitting a new mapping job; omitted when resuming with a ticket or continuation.',
       ),
     to_db: z
       .enum(ID_MAPPING_TO_DBS)
       .optional()
       .describe(
-        'Target database. UniProtKB-Swiss-Prot = reviewed accessions only (the usual intent); UniProtKB / UniProtKB_AC-ID also include unreviewed TrEMBL. Required unless resuming with a ticket.',
+        'Target database. UniProtKB-Swiss-Prot = reviewed accessions only (the usual intent); UniProtKB / UniProtKB_AC-ID also include unreviewed TrEMBL. Required only when submitting a new mapping job; omitted when resuming with a ticket or continuation.',
       ),
     ids: z
       .array(
@@ -39,7 +46,9 @@ export const mapIds = tool('uniprot_map_ids', {
       )
       .max(100_000)
       .optional()
-      .describe('Identifiers to translate. Required unless resuming with a ticket.'),
+      .describe(
+        'Identifiers to translate. Required only when submitting a new mapping job; omitted when resuming with a ticket or continuation.',
+      ),
     tax_id: z
       .number()
       .int()
@@ -50,15 +59,21 @@ export const mapIds = tool('uniprot_map_ids', {
       ),
     ticket: z
       .string()
+      .min(1)
       .optional()
       .describe(
-        'A ticket from a prior status "running" response. Pass this alone (no from_db/to_db/ids) to fetch the completed result.',
+        'Running-job ticket from a prior status "running" response. Pass it alone to poll that job; do not combine it with continuation or submission inputs.',
       ),
+    continuation: MappingContinuationSchema.optional().describe(
+      'Completed-page continuation from a prior status "finished" response. Pass it alone to fetch the next page without polling or re-submitting.',
+    ),
   }),
   output: z.object({
     status: z
       .enum(['finished', 'running'])
-      .describe('Job state: "finished" (results included) or "running" (re-call with the ticket).'),
+      .describe(
+        'Job state: "finished" (one completed results page included) or "running" (poll with ticket).',
+      ),
     results: z
       .array(
         z
@@ -70,14 +85,17 @@ export const mapIds = tool('uniprot_map_ids', {
       )
       .optional()
       .describe(
-        'Resolved mappings (present when status is "finished"). A source ID with no mapping is simply absent.',
+        'Resolved mappings on this completed page (present only when status is "finished"). Failed source IDs are reported in unmappedIds.',
       ),
     ticket: z
       .string()
       .optional()
       .describe(
-        'Resumable job ticket (present when status is "running"). Re-call this tool with ticket set, and nothing else, to fetch the result.',
+        'Running-job ticket (present only when status is "running"). Pass it alone to poll the same job.',
       ),
+    continuation: MappingContinuationSchema.optional().describe(
+      'Next completed-page continuation (finished jobs only). Pass it alone to fetch the next page; absent on the terminal page.',
+    ),
   }),
   enrichment: {
     mappedCount: z
@@ -88,7 +106,7 @@ export const mapIds = tool('uniprot_map_ids', {
       .array(z.string().describe('A source ID that resolved to nothing.'))
       .optional()
       .describe(
-        'Input IDs with no mapping in the target database (finished jobs only). Absent when resuming or all mapped.',
+        'Source IDs UniProt reported as failed on this completed page. Absent when none failed.',
       ),
     notice: z
       .string()
@@ -102,8 +120,14 @@ export const mapIds = tool('uniprot_map_ids', {
     {
       reason: 'missing_inputs',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'Neither a ticket nor the full from_db/to_db/ids triple was provided.',
-      recovery: 'Provide from_db, to_db, and ids to start a job, or a ticket alone to resume one.',
+      when: 'No complete submission, running-job ticket, or completed-page continuation was provided.',
+      recovery: 'Provide from_db, to_db, and ids; a ticket alone; or a continuation alone.',
+    },
+    {
+      reason: 'conflicting_inputs',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'Submission inputs, a running-job ticket, or a completed-page continuation were combined.',
+      recovery: 'Provide exactly one mode: submission fields, ticket alone, or continuation alone.',
     },
     {
       reason: 'unsupported_db_pair',
@@ -117,16 +141,38 @@ export const mapIds = tool('uniprot_map_ids', {
       when: 'The resume ticket is unknown or has expired server-side (UniProt holds jobs only temporarily).',
       recovery: 'Re-submit the original from_db/to_db/ids to start a fresh mapping job.',
     },
+    {
+      reason: 'invalid_continuation',
+      code: JsonRpcErrorCode.NotFound,
+      when: 'The completed-page continuation refers to a result page that is unknown or expired.',
+      recovery: 'Restart the mapping job and use each returned continuation before it expires.',
+    },
   ],
 
   async handler(input, ctx) {
-    // Resume path — ticket alone.
+    const hasSubmissionInputs =
+      input.from_db !== undefined ||
+      input.to_db !== undefined ||
+      input.ids !== undefined ||
+      input.tax_id !== undefined;
+    if (
+      (input.ticket && (input.continuation || hasSubmissionInputs)) ||
+      (input.continuation && hasSubmissionInputs)
+    ) {
+      throw ctx.fail('conflicting_inputs', undefined, {
+        ...ctx.recoveryFor('conflicting_inputs'),
+      });
+    }
+
+    const service = getUniProtService();
+    let result: Awaited<ReturnType<typeof service.mapIds>>;
+    let mode: 'start' | 'ticket' | 'continuation';
+
     if (input.ticket) {
-      let result: Awaited<ReturnType<ReturnType<typeof getUniProtService>['resumeMapping']>>;
+      mode = 'ticket';
       try {
-        result = await getUniProtService().resumeMapping(input.ticket, ctx);
+        result = await service.resumeMapping(input.ticket, ctx);
       } catch (err) {
-        // An unknown/expired ticket surfaces as a 404 (→ NotFound) from the status endpoint.
         if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
           throw ctx.fail(
             'invalid_ticket',
@@ -138,80 +184,88 @@ export const mapIds = tool('uniprot_map_ids', {
         }
         throw err;
       }
-      if (result.status === 'running') {
-        ctx.enrich.notice('Mapping job is still running. Re-call with the same ticket shortly.');
-        return { status: 'running' as const, ticket: result.ticket };
+    } else if (input.continuation) {
+      mode = 'continuation';
+      try {
+        result = await service.resumeMappingPage(input.continuation, ctx);
+      } catch (err) {
+        if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
+          throw ctx.fail(
+            'invalid_continuation',
+            'The completed mapping page is unknown or expired.',
+            { ...ctx.recoveryFor('invalid_continuation') },
+          );
+        }
+        throw err;
       }
-      ctx.enrich({ mappedCount: result.results.length });
-      if (result.results.length === 0)
-        ctx.enrich.notice('Job finished with no mappings in the target database.');
-      return { status: 'finished' as const, results: result.results };
-    }
-
-    // Start path — requires the full from/to/ids triple. Validate before touching the service.
-    if (!input.from_db || !input.to_db || !input.ids?.length) {
-      throw ctx.fail('missing_inputs', undefined, { ...ctx.recoveryFor('missing_inputs') });
-    }
-    const service = getUniProtService();
-
-    let result: Awaited<ReturnType<typeof service.mapIds>>;
-    try {
-      result = await service.mapIds(input.from_db, input.to_db, input.ids, input.tax_id, ctx);
-    } catch (err) {
-      // UniProt rejects unsupported pairs at submission with a 400, which the
-      // framework classifies as InvalidParams. Detect by code — the raw message
-      // ("Fetch failed … Status: 400") carries neither the pair nor "not supported".
-      if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
-        throw ctx.fail(
-          'unsupported_db_pair',
-          `Mapping ${input.from_db} → ${input.to_db} is not supported.`,
-          {
-            ...ctx.recoveryFor('unsupported_db_pair'),
-          },
-        );
+    } else {
+      mode = 'start';
+      if (!input.from_db || !input.to_db || !input.ids?.length) {
+        throw ctx.fail('missing_inputs', undefined, { ...ctx.recoveryFor('missing_inputs') });
       }
-      throw err;
+      try {
+        result = await service.mapIds(input.from_db, input.to_db, input.ids, input.tax_id, ctx);
+      } catch (err) {
+        if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
+          throw ctx.fail(
+            'unsupported_db_pair',
+            `Mapping ${input.from_db} → ${input.to_db} is not supported.`,
+            { ...ctx.recoveryFor('unsupported_db_pair') },
+          );
+        }
+        throw err;
+      }
     }
 
     if (result.status === 'running') {
-      ctx.enrich.notice(
-        `Mapping job still running after the inline budget. Re-call with ticket "${result.ticket}" to fetch results.`,
-      );
+      const notice =
+        mode === 'ticket'
+          ? 'Mapping job is still running. Re-call with the same ticket shortly.'
+          : `Mapping job still running after the inline budget. Re-call with ticket "${result.ticket}" to poll it.`;
+      ctx.enrich.notice(notice);
       ctx.log.info('ID mapping exceeded inline budget', {
         ticket: result.ticket,
-        from: input.from_db,
-        to: input.to_db,
+        mode,
+        ...(input.from_db ? { from: input.from_db } : {}),
+        ...(input.to_db ? { to: input.to_db } : {}),
       });
       return { status: 'running' as const, ticket: result.ticket };
     }
 
-    const mappedFrom = new Set(result.results.map((r) => r.from));
-    const unmapped = input.ids.filter((id) => !mappedFrom.has(id));
     ctx.enrich({
       mappedCount: result.results.length,
-      ...(unmapped.length ? { unmappedIds: unmapped } : {}),
+      ...(result.failedIds.length ? { unmappedIds: result.failedIds } : {}),
     });
     if (result.results.length === 0) {
-      ctx.enrich.notice(
-        `No ${input.from_db} IDs mapped to ${input.to_db}. Check the IDs and database pair, or add tax_id.`,
-      );
+      ctx.enrich.notice('Completed result page contains no mappings in the target database.');
     }
     ctx.log.info('ID mapping finished', {
-      from: input.from_db,
-      to: input.to_db,
+      mode,
+      ...(input.from_db ? { from: input.from_db } : {}),
+      ...(input.to_db ? { to: input.to_db } : {}),
       mapped: result.results.length,
-      unmapped: unmapped.length,
+      unmapped: result.failedIds.length,
+      hasContinuation: result.continuation !== undefined,
     });
 
-    return { status: 'finished' as const, results: result.results };
+    return {
+      status: 'finished' as const,
+      results: result.results,
+      ...(result.continuation ? { continuation: result.continuation } : {}),
+    };
   },
 
   format: (result) => {
     const lines = [`**Status:** ${result.status}`];
     if (result.ticket)
-      lines.push(`**Ticket:** ${result.ticket} (re-call with this to fetch results)`);
-    const results = result.results ?? [];
+      lines.push(`**Ticket:** ${result.ticket} (re-call with this to poll the running job)`);
     if (result.status === 'finished') {
+      if (result.continuation) {
+        lines.push(
+          `**Next page:** re-call with continuation {"jobId":"${result.continuation.jobId}","cursor":"${result.continuation.cursor}"}`,
+        );
+      }
+      const results = result.results ?? [];
       if (results.length === 0) {
         lines.push('No mappings resolved.');
       } else {

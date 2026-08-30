@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.3](changelog/0.2.x/0.2.3.md) — 2026-08-30
+
+uniprot_map_ids preserves UniProt failed IDs, separates completed-page continuations from running-job tickets, and avoids transferring results during finished status probes.
+
 ## [0.2.2](changelog/0.2.x/0.2.2.md) — 2026-08-21
 
 Eight typed contract errors move from InvalidParams (-32602) to ValidationError (-32007), and the framework bump to mcp-ts-core ^0.12.3 tightens the wire: tool inputs reject undeclared argument keys, the advertised outputSchema declares the error envelope, and schemas emit as JSON Schema 2020-12.

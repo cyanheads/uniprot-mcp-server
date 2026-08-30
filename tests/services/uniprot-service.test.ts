@@ -46,7 +46,7 @@ let service: InstanceType<typeof UniProtService>;
 const ctx = () => createMockContext();
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  fetchWithTimeoutMock.mockReset();
   service = new UniProtService(mockConfig, mockStorage);
 });
 
@@ -468,14 +468,109 @@ describe('UniProtService — ID mapping loop', () => {
       .mockResolvedValueOnce(jsonResponse({ jobStatus: 'FINISHED' }))
       // GET /idmapping/results/job-1 → results (object-form `to`)
       .mockResolvedValueOnce(
-        jsonResponse({ results: [{ from: 'TP53', to: { primaryAccession: 'P04637' } }] }),
+        jsonResponse({
+          results: [{ from: 'TP53', to: { primaryAccession: 'P04637' } }],
+          failedIds: ['ZZZNOTAREALGENE'],
+        }),
       );
 
     const result = await service.mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx());
     expect(result.status).toBe('finished');
     if (result.status === 'finished') {
       expect(result.results).toEqual([{ from: 'TP53', to: 'P04637' }]);
+      expect(result.failedIds).toEqual(['ZZZNOTAREALGENE']);
     }
+  });
+
+  it('recognizes a finished 303 status without following the results redirect', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ jobId: 'job-303' }))
+      .mockImplementationOnce((_url, _timeout, _context, options) => {
+        expect(options).toMatchObject({ redirect: 'manual', expectedStatuses: [303] });
+        return Promise.reject(
+          new McpError(JsonRpcErrorCode.InternalError, 'Status endpoint returned 303.', {
+            status: 303,
+            statusCode: 303,
+            body: '{"jobStatus":"FINISHED"}',
+            responseBody: '{"jobStatus":"FINISHED"}',
+          }),
+        );
+      })
+      .mockResolvedValueOnce(
+        jsonResponse({ results: [{ from: 'TP53', to: { primaryAccession: 'P04637' } }] }),
+      );
+
+    const result = await service.mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx());
+    expect(result.status).toBe('finished');
+    expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchWithTimeoutMock.mock.calls[2]?.[0])).toContain('/idmapping/results/job-303');
+  });
+
+  it('returns one completed page and a continuation without fetching the next page', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ jobId: 'job-pages' }))
+      .mockResolvedValueOnce(jsonResponse({ jobStatus: 'FINISHED' }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          {
+            results: [{ from: 'TP53', to: { primaryAccession: 'P04637' } }],
+            failedIds: ['ZZZNOTAREALGENE'],
+          },
+          {
+            link: '<https://rest.uniprot.org/idmapping/results/job-pages?format=json&size=500&cursor=cursor-2>; rel="next"',
+          },
+        ),
+      );
+
+    const result = await service.mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx());
+    expect(result).toEqual({
+      status: 'finished',
+      results: [{ from: 'TP53', to: 'P04637' }],
+      failedIds: ['ZZZNOTAREALGENE'],
+      continuation: { jobId: 'job-pages', cursor: 'cursor-2' },
+    });
+    expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(3);
+    expect(String(fetchWithTimeoutMock.mock.calls[2]?.[0])).not.toContain('cursor=cursor-2');
+  });
+
+  it('uses a completed-page continuation and propagates another page without probing status or re-submitting', async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          results: [{ from: 'BRCA1', to: 'P38398' }],
+          failedIds: ['ZZZNOTAREALGENE'],
+        },
+        {
+          link: '<https://rest.uniprot.org/idmapping/results/job-pages?format=json&size=500&cursor=cursor-3>; rel="next"',
+        },
+      ),
+    );
+
+    const result = await service.resumeMappingPage(
+      { jobId: 'job-pages', cursor: 'cursor-2' },
+      ctx(),
+    );
+    expect(result).toEqual({
+      status: 'finished',
+      results: [{ from: 'BRCA1', to: 'P38398' }],
+      failedIds: ['ZZZNOTAREALGENE'],
+      continuation: { jobId: 'job-pages', cursor: 'cursor-3' },
+    });
+    expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(1);
+    const sentUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
+    expect(sentUrl.pathname).toBe('/idmapping/results/job-pages');
+    expect(sentUrl.searchParams.get('cursor')).toBe('cursor-2');
+    expect(sentUrl.searchParams.get('size')).toBe('500');
+  });
+
+  it('returns an empty terminal page when a continuation is past the remaining rows', async () => {
+    fetchWithTimeoutMock.mockResolvedValueOnce(jsonResponse({ results: [], failedIds: [] }));
+
+    const result = await service.resumeMappingPage(
+      { jobId: 'job-pages', cursor: 'past-end' },
+      ctx(),
+    );
+    expect(result).toEqual({ status: 'finished', results: [], failedIds: [] });
   });
 
   it('throws ServiceUnavailable when the run submission returns no jobId', async () => {
@@ -494,6 +589,24 @@ describe('UniProtService — ID mapping loop', () => {
     const result = await service.resumeMapping('job-1', ctx());
     expect(result.status).toBe('running');
     if (result.status === 'running') expect(result.ticket).toBe('job-1');
+  });
+
+  it('resumeMapping returns normalized results when the job has finished', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ jobStatus: 'FINISHED' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          results: [{ from: 'TP53', to: { primaryAccession: 'P04637' } }],
+          failedIds: ['ZZZNOTAREALGENE'],
+        }),
+      );
+
+    const result = await service.resumeMapping('job-1', ctx());
+    expect(result.status).toBe('finished');
+    if (result.status === 'finished') {
+      expect(result.results).toEqual([{ from: 'TP53', to: 'P04637' }]);
+      expect(result.failedIds).toEqual(['ZZZNOTAREALGENE']);
+    }
   });
 });
 

@@ -29,7 +29,9 @@ import type {
   EvidencedText,
   Feature,
   GoTerm,
+  IdMappingContinuation,
   IdMappingFromDb,
+  IdMappingPage,
   IdMappingResult,
   IdMappingToDb,
   Isoform,
@@ -372,7 +374,7 @@ export class UniProtService {
       if (ctx.signal.aborted) break;
       const status = await this.mappingStatus(jobId, ctx);
       if (status === 'FINISHED') {
-        return { status: 'finished', results: await this.mappingResults(jobId, ctx) };
+        return { status: 'finished', ...(await this.mappingResults(jobId, ctx)) };
       }
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -383,7 +385,18 @@ export class UniProtService {
   async resumeMapping(ticket: string, ctx: Context): Promise<IdMappingResult> {
     const status = await this.mappingStatus(ticket, ctx);
     if (status !== 'FINISHED') return { status: 'running', ticket };
-    return { status: 'finished', results: await this.mappingResults(ticket, ctx) };
+    return { status: 'finished', ...(await this.mappingResults(ticket, ctx)) };
+  }
+
+  /** Fetch the next page of an already-completed ID-mapping job. */
+  async resumeMappingPage(
+    continuation: IdMappingContinuation,
+    ctx: Context,
+  ): Promise<IdMappingResult> {
+    return {
+      status: 'finished',
+      ...(await this.mappingResults(continuation.jobId, ctx, continuation.cursor)),
+    };
   }
 
   private async runMapping(
@@ -424,39 +437,71 @@ export class UniProtService {
     return data.jobId;
   }
 
-  private async mappingStatus(jobId: string, ctx: Context): Promise<string> {
-    const { data } = await this.getJson<{ jobStatus?: string; results?: unknown[] }>(
-      `${this.baseUrl}/idmapping/status/${jobId}`,
-      'uniprot.mappingStatus',
-      ctx,
-    );
-    // When a job is finished the status endpoint may 303-redirect straight to results,
-    // in which case the body already carries `results` and no `jobStatus`.
-    if (data.jobStatus) return data.jobStatus;
-    if (data.results) return 'FINISHED';
-    return 'RUNNING';
+  private mappingStatus(jobId: string, ctx: Context): Promise<string> {
+    const operation = 'uniprot.mappingStatus';
+    const reqCtx = this.reqCtx(operation, ctx);
+    return this.withRetry(operation, ctx, async () => {
+      try {
+        const response = await fetchWithTimeout(
+          `${this.baseUrl}/idmapping/status/${jobId}`,
+          this.timeoutMs,
+          reqCtx,
+          {
+            redirect: 'manual',
+            expectedStatuses: [303],
+            signal: ctx.signal,
+          },
+        );
+        const text = await response.text();
+        this.guardHtml(text);
+        const data = JSON.parse(text) as { jobStatus?: string };
+        return data.jobStatus ?? 'RUNNING';
+      } catch (err) {
+        const status =
+          err instanceof McpError && err.data
+            ? ((err.data as Record<string, unknown>).status ??
+              (err.data as Record<string, unknown>).statusCode)
+            : undefined;
+        if (status === 303) return 'FINISHED';
+        return sanitizeUpstreamError(err, operation);
+      }
+    });
   }
 
   private async mappingResults(
     jobId: string,
     ctx: Context,
-  ): Promise<{ from: string; to: string }[]> {
-    const collected: { from: string; to: string }[] = [];
-    let url: string | undefined = `${this.baseUrl}/idmapping/results/${jobId}?format=json&size=500`;
+    cursor?: string,
+  ): Promise<IdMappingPage> {
+    const url = new URL(`${this.baseUrl}/idmapping/results/${jobId}`);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('size', '500');
+    if (cursor) url.searchParams.set('cursor', cursor);
 
-    while (url) {
-      const { data, response }: { data: RawMappingResults; response: Response } =
-        await this.getJson<RawMappingResults>(url, 'uniprot.mappingResults', ctx);
-      for (const row of data.results ?? []) {
-        collected.push({
-          from: row.from,
-          to: typeof row.to === 'string' ? row.to : row.to.primaryAccession,
-        });
+    const { data, response } = await this.getJson<RawMappingResults>(
+      url.toString(),
+      'uniprot.mappingResults',
+      ctx,
+    );
+    const results = (data.results ?? []).map((row) => ({
+      from: row.from,
+      to: typeof row.to === 'string' ? row.to : row.to.primaryAccession,
+    }));
+    const nextUrl = this.parseNextLink(response);
+    let continuation: IdMappingContinuation | undefined;
+    if (nextUrl) {
+      const nextCursor = new URL(nextUrl).searchParams.get('cursor');
+      if (!nextCursor) {
+        throw serviceUnavailable('UniProt returned an ID-mapping next-page link without a cursor.');
       }
-      url = this.parseNextLink(response);
-      if (ctx.signal.aborted) break;
+      continuation = { jobId, cursor: nextCursor };
     }
-    return collected;
+
+    return {
+      results,
+      failedIds: data.failedIds ?? [],
+      ...(continuation ? { continuation } : {}),
+    };
   }
 
   /** Full next-page URL from the Link header (results pages carry a full URL, not just a cursor). */
@@ -870,6 +915,7 @@ type RawTaxon = {
 
 type RawMappingResults = {
   results?: { from: string; to: string | { primaryAccession: string } }[];
+  failedIds?: string[];
 };
 
 // --- Module-level normalizers (no class state) ---

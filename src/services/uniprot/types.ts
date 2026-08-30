@@ -307,7 +307,20 @@ export type ProteomeProteinPage = {
   totalResults: number;
 };
 
-/** Result of an ID-mapping job: finished mappings, or a resumable ticket. */
+/** Cursor state for the next completed ID-mapping results page. */
+export type IdMappingContinuation = {
+  jobId: string;
+  cursor: string;
+};
+
+/** One completed ID-mapping results page, including upstream failure metadata. */
+export type IdMappingPage = {
+  results: { from: string; to: string }[];
+  failedIds: string[];
+  continuation?: IdMappingContinuation;
+};
+
+/** Result of an ID-mapping call: one finished page, or a running-job ticket. */
 export type IdMappingResult =
-  | { status: 'finished'; results: { from: string; to: string }[] }
+  | ({ status: 'finished' } & IdMappingPage)
   | { status: 'running'; ticket: string };

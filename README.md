@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/uniprot-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/uniprot-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/uniprot-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/uniprot-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/uniprot-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/uniprot-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -35,7 +35,7 @@ Six tools for protein-first research over UniProt — discovery search is the en
 |:---|:---|
 | `uniprot_search_proteins` | Search UniProtKB by plain text or a Lucene field query, with the reviewed (Swiss-Prot) filter foregrounded and optional server-side facet counts. Cursor-paginated. The discovery entry point. |
 | `uniprot_get_entry` | Fetch full curated entries by accession in one batch (up to 20) — function, catalytic activity, disease, variants, isoforms, GO terms, cross-references. Partial-success output; an oversized record returns a section outline. |
-| `uniprot_map_ids` | Translate identifiers across databases via UniProt's async ID-mapping service — gene names, Ensembl, RefSeq, ChEMBL, PDB, GeneID ↔ UniProtKB accessions. Polls within a budget; returns a resumable ticket on overflow. |
+| `uniprot_map_ids` | Translate identifiers across databases via UniProt's async ID-mapping service — gene names, Ensembl, RefSeq, ChEMBL, PDB, GeneID ↔ UniProtKB accessions. Polls within a budget; running jobs return a ticket and completed pages return a continuation. |
 | `uniprot_get_proteome` | Fetch a reference proteome by UPID or NCBI taxon ID — protein count, BUSCO completeness, genome assembly inline, plus an opt-in capped page of the proteins. |
 | `uniprot_get_taxonomy` | Resolve a taxonomy record by NCBI taxon ID or scientific name — name, rank, parent, full lineage, and optionally the immediate children. |
 | `uniprot_get_sequence` | Fetch the canonical amino-acid sequence (FASTA) for an accession, with length and parsed header — and optionally the isoform sequences. The cheap sequence-only path. |
@@ -72,9 +72,10 @@ Translate identifiers across databases via UniProt's ID-mapping service — the 
 
 - `from_db` / `to_db` are validated enums (e.g. `Gene_Name`, `Ensembl`, `RefSeq_Protein`, `ChEMBL`, `PDB`, `GeneID`, `UniProtKB_AC-ID`) so an unsupported pair fails before the upstream call
 - Target `UniProtKB-Swiss-Prot` for reviewed accessions only (the usual intent), or `UniProtKB` / `UniProtKB_AC-ID` to include unreviewed TrEMBL
-- The job runs asynchronously; the tool submits it and polls within a budget. Finishes in time → `status: "finished"` with the mappings; runs long → `status: "running"` with a resumable ticket — re-call with the ticket alone (the job is held server-side)
+- The job runs asynchronously; the tool submits it and polls within a budget. A running job returns `status: "running"` with a ticket — pass that ticket alone to poll the same job
+- A completed call returns `status: "finished"` with one upstream page (up to 500 mappings). If `continuation` is present, pass it alone to fetch the next completed page without polling or re-submitting; its absence marks the terminal page
 - Pair a gene-symbol `from_db` with `tax_id` to disambiguate species
-- Reports unmapped input IDs alongside the resolved mappings
+- `unmappedIds` is populated only from UniProt's `failedIds`, so identifiers UniProt normalizes in successful result rows are not misclassified as failures
 
 ---
 
@@ -133,13 +134,13 @@ UniProt-specific:
 - Keyless — UniProt REST requires no API key; works against any `rest.uniprot.org`-compatible base (override `UNIPROT_BASE_URL` for a private mirror)
 - One thin `fetch` client over all four REST collections (UniProtKB, ID Mapping, Proteomes, Taxonomy) with retry/backoff and HTML-error-page detection
 - Batch entry fetch — N accessions in one round trip, cross-referenced against the request to flag any missing
-- Async ID-mapping run → poll → results bounded by a wall-clock budget, with a resumable server-side ticket on overflow
+- Async ID-mapping run → poll bounded by a wall-clock budget, with a running-job ticket and separately paginated completed results
 
 Agent-friendly output:
 
 - Provenance is data, not decoration — `reviewed`, `annotationScore`, `proteinExistence`, and per-field PubMed/ECO evidence ship on every record so the agent can weigh manual vs. predicted annotation
 - Graceful partial failure — `uniprot_get_entry` returns per-accession `succeeded[]` / `failed[]` rows instead of aborting the batch
-- Discriminated output contracts — `uniprot_get_entry` returns `kind: "full" | "outline"`, `uniprot_map_ids` returns `status: "finished" | "running"`; callers branch on data, not string parsing
+- Discriminated output contracts — `uniprot_get_entry` returns `kind: "full" | "outline"`, while `uniprot_map_ids` separates a running-job `ticket` from a finished-page `continuation`; callers branch on data, not string parsing
 - Sparsity preserved — absent upstream fields stay absent, never fabricated (most curated sections are legitimately missing on TrEMBL entries)
 
 ## Getting started
