@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/uniprot-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/uniprot-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/uniprot-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.4-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/uniprot-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/uniprot-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/uniprot-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -27,9 +27,11 @@
 
 ---
 
-## Tools
+## Overview
 
-Six tools for protein-first research over UniProt — discovery search is the entry point, `uniprot_map_ids` is the bridge that turns any sibling identifier into a UniProtKB accession, and the rest fetch curated records, proteomes, taxonomy, and sequences:
+Protein research over UniProtKB (rest.uniprot.org). Search by function or gene, fetch curated records, translate identifiers across sibling databases, and pull reference proteomes, taxonomy, and sequences from any MCP client. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+
+### Tools
 
 | Tool | Description |
 |:---|:---|
@@ -40,9 +42,24 @@ Six tools for protein-first research over UniProt — discovery search is the en
 | `uniprot_get_taxonomy` | Resolve a taxonomy record by NCBI taxon ID or scientific name — name, rank, parent, full lineage, and optionally the immediate children. |
 | `uniprot_get_sequence` | Fetch the canonical amino-acid sequence (FASTA) for an accession, with length and parsed header — and optionally the isoform sequences. The cheap sequence-only path. |
 
-### `uniprot_search_proteins`
+### Resources
 
-Search UniProtKB and return curated protein records — the discovery entry point.
+| Resource | Description |
+|:---|:---|
+| `uniprot://entry/{accession}` | A curated UniProtKB entry by accession — the resource mirror of `uniprot_get_entry` for a single accession. |
+| `uniprot://taxonomy/{taxonId}` | A taxonomy record by NCBI taxon ID — name, rank, parent, full lineage. The mirror of `uniprot_get_taxonomy` by ID. |
+
+All resource data is also reachable via tools — tool-only clients lose nothing. UniProtKB is far too large to enumerate, so there is no resource `list()`; discovery is `uniprot_search_proteins`'s job.
+
+### Prompts
+
+| Prompt | Description |
+|:---|:---|
+| `uniprot_protein_dossier` | Guided protein-research workflow — resolve an identifier, fetch the curated entry, pull disease and variants, and surface cross-references for structure, citations, and bioactivity. |
+
+## Capability reference
+
+### `uniprot_search_proteins` <sub>tool</sub>
 
 - `text_search` for plain language (the 80% case) **or** `query` for full Lucene field syntax (`gene`, `organism_id`, `keyword`, `go`, `reviewed`, `protein_name`, `family`, `length`, `existence`, `accession`) — exactly one
 - `reviewed` defaults to `true` (Swiss-Prot only) so the agent isn't drowned in TrEMBL predictions; set `false` to include them
@@ -53,9 +70,7 @@ Search UniProtKB and return curated protein records — the discovery entry poin
 
 ---
 
-### `uniprot_get_entry`
-
-Fetch full curated UniProtKB entries by accession in batch — this tool does not search.
+### `uniprot_get_entry` <sub>tool</sub>
 
 - Batch up to 20 accessions in one round trip
 - Sectioned record: function, catalytic activity, cofactors, subcellular location, disease, PTMs, natural variants, isoforms, domains, GO terms, keywords, cross-references
@@ -66,23 +81,20 @@ Fetch full curated UniProtKB entries by accession in batch — this tool does no
 
 ---
 
-### `uniprot_map_ids`
-
-Translate identifiers across databases via UniProt's ID-mapping service — the bridge from any sibling server's identifier into a UniProtKB accession.
+### `uniprot_map_ids` <sub>tool</sub>
 
 - `from_db` / `to_db` are validated enums (e.g. `Gene_Name`, `Ensembl`, `RefSeq_Protein`, `ChEMBL`, `PDB`, `GeneID`, `UniProtKB_AC-ID`) so an unsupported pair fails before the upstream call
 - Target `UniProtKB-Swiss-Prot` for reviewed accessions only (the usual intent), or `UniProtKB` / `UniProtKB_AC-ID` to include unreviewed TrEMBL
 - The job runs asynchronously; the tool submits it and polls within a budget. A running job returns `status: "running"` with a ticket — pass that ticket alone to poll the same job
-- A completed call returns `status: "finished"` with one upstream page (up to 500 mappings). If `continuation` is present, pass it alone to fetch the next completed page without polling or re-submitting; its absence marks the terminal page
+- A completed call returns `status: "finished"` with one upstream page. If `continuation` is present, pass it alone to fetch the next completed page without polling or re-submitting; its absence marks the terminal page
 - Pair a gene-symbol `from_db` with `tax_id` to disambiguate species
 - `unmappedIds` is populated only from UniProt's `failedIds`, so identifiers UniProt normalizes in successful result rows are not misclassified as failures
 
 ---
 
-### `uniprot_get_proteome`
+### `uniprot_get_proteome` <sub>tool</sub>
 
-Fetch the reference proteome for an organism by UPID or NCBI taxon ID — provide exactly one.
-
+- Provide exactly one of `upid` (e.g. `UP000005640`) or `taxon_id` — providing both or neither fails validation
 - Metadata inline: proteome type, total protein count, BUSCO completeness (score, complete/fragmented/missing counts, lineage dataset), genome assembly accession
 - The protein set is opt-in via `include_proteins` (it is large — human is ~147,506) and returns a capped page with a forward cursor and truncation disclosure
 - Narrow the protein list with the `query` filter (UniProtKB Lucene syntax) for a subset
@@ -90,44 +102,48 @@ Fetch the reference proteome for an organism by UPID or NCBI taxon ID — provid
 
 ---
 
-### `uniprot_get_taxonomy`
+### `uniprot_get_taxonomy` <sub>tool</sub>
 
-Resolve a taxonomy record by NCBI taxon ID or scientific name — provide exactly one.
-
+- Provide exactly one of `taxon_id` (NCBI numeric ID) or `name` (scientific name) — both or neither fails validation
 - Returns scientific and common name, mnemonic, rank, parent, and the full lineage (root → near ancestor)
 - `include_children` fetches the immediate child taxa via a follow-up search (not inline on the record)
 - Turns an organism name into the taxon ID that `uniprot_search_proteins` (`organism_id`) and `uniprot_get_proteome` (`taxon_id`) expect
 
 ---
 
-### `uniprot_get_sequence`
-
-Fetch the canonical amino-acid sequence (FASTA) for an accession — the cheap, sequence-only path (for the full functional record use `uniprot_get_entry`).
+### `uniprot_get_sequence` <sub>tool</sub>
 
 - Returns the canonical sequence with its length and parsed FASTA header
 - `include_isoforms` also returns the alternatively-spliced isoform sequences
 - Accessions come from `uniprot_search_proteins` or `uniprot_map_ids`; strip any `-N` isoform suffix first
 
-## Resources and prompts
+---
 
-| Type | Name | Description |
-|:---|:---|:---|
-| Resource | `uniprot://entry/{accession}` | A curated UniProtKB entry by accession — the resource mirror of `uniprot_get_entry` for a single accession. |
-| Resource | `uniprot://taxonomy/{taxonId}` | A taxonomy record by NCBI taxon ID — name, rank, parent, full lineage. The mirror of `uniprot_get_taxonomy` by ID. |
-| Prompt | `uniprot_protein_dossier` | Guided protein-research workflow — resolve an identifier, fetch the curated entry, pull disease and variants, and surface cross-references for structure, citations, and bioactivity. |
+### `uniprot://entry/{accession}` <sub>resource</sub>
 
-All resource data is also reachable via tools — tool-only clients lose nothing. UniProtKB is far too large to enumerate, so there is no resource `list()`; discovery is `uniprot_search_proteins`'s job.
+- Same record as `uniprot_get_entry` for a single accession, addressed by URI instead of a tool call
+- An annotation-heavy entry over the outline budget returns a bounded identity summary plus a section outline instead of the full record — fetch specific sections via the `uniprot_get_entry` tool (`sections: [...]`); the resource URI itself takes no sections parameter
+- The overflow summary always keeps identity fields — accession, entry name, protein name, genes, organism, length, reviewed status, annotation score, protein existence
+
+---
+
+### `uniprot://taxonomy/{taxonId}` <sub>resource</sub>
+
+- Addressed by NCBI taxon ID, e.g. `uniprot://taxonomy/9606` for human
+- Returns scientific and common name, mnemonic, rank, parent, and full lineage — same shape as `uniprot_get_taxonomy` without `include_children`
+- Tool-only clients reach the same data via `uniprot_get_taxonomy`
+
+---
+
+### `uniprot_protein_dossier` <sub>prompt</sub>
+
+- Arguments: `identifier` required (gene name, accession, or protein name); `organism` optional to disambiguate
+- Five-step workflow embedded in the generated message: resolve identifier → fetch entry → summarize function/localization/provenance → pull disease & variants → surface cross-references for structure (PDB), bioactivity (ChEMBL), and citations (PubMed)
+- Returns a single user-role message carrying the full instructions — no separate assistant framing message
 
 ## Features
 
-Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp-ts-core):
-
-- Declarative tool, resource, and prompt definitions — single file per primitive, framework handles registration and validation
-- Unified error handling — handlers throw, framework catches, classifies, and formats
-- Pluggable auth: `none`, `jwt`, `oauth`
-- Swappable storage backends: `in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`
-- Structured logging with optional OpenTelemetry tracing
-- STDIO and Streamable HTTP transports
+Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
 UniProt-specific:
 
@@ -257,6 +273,7 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for HTTP server. | `3010` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
+| `MCP_SESSION_MODE` | HTTP session posture: `auto`, `stateful`, or `stateless`. The server declares `stateless` in code — no tool holds per-session state — so set this only to opt back into a session store. | `stateless` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
 | `LOGS_DIR` | Directory for log files (Node.js only). | `<project-root>/logs` |
 | `STORAGE_PROVIDER_TYPE` | Storage backend. | `in-memory` |
@@ -320,7 +337,7 @@ See [`CLAUDE.md`](./CLAUDE.md) (and the byte-identical [`AGENTS.md`](./AGENTS.md
 
 ## Contributing
 
-Issues and pull requests are welcome. Run checks and tests before submitting:
+Issues are welcome. Run checks and tests before submitting:
 
 ```sh
 bun run devcheck
