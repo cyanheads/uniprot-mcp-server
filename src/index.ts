@@ -21,6 +21,13 @@ import { initUniProtService } from './services/uniprot/uniprot-service.js';
 await createApp({
   name: 'uniprot-mcp-server',
   title: 'uniprot-mcp-server',
+  /**
+   * No tool here holds per-session state or calls `ctx.requestInput`, so the
+   * session store buys nothing. Declaring it here rather than leaving it to
+   * `MCP_SESSION_MODE` means stdio, `bunx`, source, and the container all
+   * resolve the same posture; the env var still wins when a deployment sets it.
+   */
+  sessionMode: 'stateless',
   tools: [searchProteins, getEntry, mapIds, getProteome, getTaxonomy, getSequence],
   resources: [entryResource, taxonomyResource],
   prompts: [proteinDossier],
