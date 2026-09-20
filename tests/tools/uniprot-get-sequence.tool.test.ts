@@ -199,13 +199,21 @@ describe('getSequence error envelope (through runToolContract)', () => {
   });
 
   it('puts no upstream request URL or response body on the client-facing error data', async () => {
+    // The service sanitizes upstream internals before they get here; this pins
+    // the second line of defense — the handler re-throws with its own data and
+    // never spreads the caught error's, so leaky keys cannot ride through.
     getFastaMock.mockRejectedValue(
-      notFound('No sequence found for accession Q99999.', { accession: 'Q99999' }),
+      notFound('No sequence found for accession Q99999.', {
+        accession: 'Q99999',
+        url: 'https://rest.uniprot.org/uniprotkb/Q99999.fasta',
+        responseBody: '<html><body>Q99999 not found</body></html>',
+      }),
     );
 
-    const envelope = errorEnvelope(await runToolContract(getSequence, { accession: 'Q99999' }));
+    const result = await runToolContract(getSequence, { accession: 'Q99999' });
+    const envelope = errorEnvelope(result);
     expect(envelope.data).not.toHaveProperty('url');
     expect(envelope.data).not.toHaveProperty('responseBody');
-    expect(envelope.message).not.toMatch(/rest\.uniprot\.org/);
+    expect(contentText(result)).not.toContain('rest.uniprot.org');
   });
 });
