@@ -4,15 +4,37 @@
  *   regression — a service NotFound must surface as data.reason === 'not_found',
  *   not a leaked raw 404 throw), canonical-record selection, the include_isoforms
  *   branch, an input-validation rejection for a malformed accession, and format()
- *   rendering.
+ *   rendering. A second suite drives the tool through runToolContract to pin the
+ *   error envelope a client actually receives on both surfaces.
  * @module tests/tools/uniprot-get-sequence.tool.test
  */
 
 import { JsonRpcErrorCode, notFound } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SequenceRecord } from '@/services/uniprot/types.js';
 import { expectMcpError } from '../helpers.js';
+
+/** The `structuredContent.error` envelope a client reads off a failed call. */
+type ErrorEnvelope = {
+  code: number;
+  message: string;
+  data?: Record<string, unknown>;
+};
+
+/** Read the error envelope out of a `runToolContract` result. */
+function errorEnvelope(result: { structuredContent?: unknown }): ErrorEnvelope {
+  const envelope = (result.structuredContent as { error?: ErrorEnvelope } | undefined)?.error;
+  if (!envelope) throw new Error('Expected the call to return an error envelope.');
+  return envelope;
+}
+
+/** Join a `runToolContract` result's text blocks — the `content[]` surface. */
+function contentText(result: { content: { type: string; text?: string }[] }): string {
+  return result.content
+    .map((block) => (block.type === 'text' ? (block.text ?? '') : ''))
+    .join('\n');
+}
 
 const getFastaMock = vi.fn();
 
@@ -123,5 +145,67 @@ describe('getSequence', () => {
     expect(text).toContain('Isoforms (1)');
     expect(text).toContain('P04637-2');
     expect(text).toContain('26 aa');
+  });
+});
+
+describe('getSequence error envelope (through runToolContract)', () => {
+  // These drive the tool the way a client does — argument parsing, handler,
+  // format(), and the dual-surface error shaping — rather than calling the
+  // handler with pre-parsed input. That is the only level at which the
+  // rejection code, the reason, and the content[] text are observable.
+
+  it('rejects an out-of-schema accession as InvalidParams, not ValidationError', async () => {
+    const result = await runToolContract(getSequence, {
+      accession: 'not-an-accession',
+    } as never);
+
+    const envelope = errorEnvelope(result);
+    expect(result.isError).toBe(true);
+    expect(envelope.code).toBe(JsonRpcErrorCode.InvalidParams);
+    expect(envelope.code).toBe(-32602);
+    expect(envelope.data).toMatchObject({ reason: 'invalid_arguments' });
+    // Containment, not byte-equality: the message embeds the compiled regex and
+    // the reason trailer, both of which move with the framework.
+    expect(contentText(result)).toContain('accession');
+    expect(contentText(result)).toContain('(reason invalid_arguments)');
+    expect(getFastaMock).not.toHaveBeenCalled();
+  });
+
+  it('renders an omitted required field as missing, with a Recovery hint on both surfaces', async () => {
+    const result = await runToolContract(getSequence, {} as never);
+
+    const envelope = errorEnvelope(result);
+    expect(envelope.code).toBe(JsonRpcErrorCode.InvalidParams);
+    const hint = (envelope.data?.recovery as { hint?: string } | undefined)?.hint;
+    expect(hint).toContain('accession');
+    // The hint adds something the message does not, so it also reaches content[].
+    expect(contentText(result)).toContain(`Recovery: ${hint}`);
+    expect(getFastaMock).not.toHaveBeenCalled();
+  });
+
+  it('carries the declared reason and recovery hint to content[] on a not_found', async () => {
+    getFastaMock.mockRejectedValue(
+      notFound('No sequence found for accession Q99999.', { accession: 'Q99999' }),
+    );
+
+    const result = await runToolContract(getSequence, { accession: 'Q99999' });
+    const envelope = errorEnvelope(result);
+    expect(envelope.code).toBe(JsonRpcErrorCode.NotFound);
+    expect(envelope.data).toMatchObject({ reason: 'not_found' });
+
+    const text = contentText(result);
+    expect(text).toContain('Recovery: Verify the accession');
+    expect(text).toContain('(reason not_found)');
+  });
+
+  it('puts no upstream request URL or response body on the client-facing error data', async () => {
+    getFastaMock.mockRejectedValue(
+      notFound('No sequence found for accession Q99999.', { accession: 'Q99999' }),
+    );
+
+    const envelope = errorEnvelope(await runToolContract(getSequence, { accession: 'Q99999' }));
+    expect(envelope.data).not.toHaveProperty('url');
+    expect(envelope.data).not.toHaveProperty('responseBody');
+    expect(envelope.message).not.toMatch(/rest\.uniprot\.org/);
   });
 });
