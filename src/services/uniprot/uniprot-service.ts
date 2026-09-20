@@ -65,6 +65,10 @@ import {
  * raw upstream error page; the rest expose status, internal request id, and the
  * internal operation label). Presence of any key flags a raw framework HTTP
  * error that must be re-thrown clean before it escapes the service.
+ *
+ * `url` is listed even though the framework stopped attaching it by default: a
+ * UniProt request URL carries the caller's query verbatim, and the opt-in that
+ * puts it back is one line away. Detection stays local to this boundary.
  */
 const LEAKY_ERROR_DATA_KEYS = [
   'responseBody',
@@ -73,6 +77,7 @@ const LEAKY_ERROR_DATA_KEYS = [
   'operation',
   'errorSource',
   'statusText',
+  'url',
 ] as const;
 
 /**

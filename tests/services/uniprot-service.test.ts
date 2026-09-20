@@ -132,6 +132,9 @@ describe('UniProtService — upstream-error leak prevention', () => {
         responseBody:
           '<html><head><title>503</title></head><body>upstream gateway error: pod uniprot-7f9 unreachable</body></html>',
         errorSource: 'FetchHttpError',
+        // Off by default upstream since the framework stopped attaching it, but
+        // reachable via includeUrl — the request URL echoes the caller's query.
+        url: 'https://rest.uniprot.org/uniprotkb/search?query=gene%3ATP53&fields=accession',
       },
     );
 
@@ -147,6 +150,7 @@ describe('UniProtService — upstream-error leak prevention', () => {
     expect(data).not.toHaveProperty('requestId');
     expect(data).not.toHaveProperty('operation');
     expect(data).not.toHaveProperty('errorSource');
+    expect(data).not.toHaveProperty('url');
     // The message must not echo the raw upstream body, internal request id, or the
     // raw "Status: NNN / rest.uniprot.org" wording.
     expect(err.message).not.toMatch(/responseBody|req-internal|uniprot-7f9|gateway error/);
