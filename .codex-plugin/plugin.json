@@ -1,6 +1,6 @@
 {
   "name": "uniprot-mcp-server",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
   "author": {
     "name": "cyanheads",

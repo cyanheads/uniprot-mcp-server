@@ -1,13 +1,17 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "uniprot-mcp-server",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
   "author": {
-    "name": "cyanheads"
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads"
   },
   "homepage": "https://github.com/cyanheads/uniprot-mcp-server#readme",
   "repository": "https://github.com/cyanheads/uniprot-mcp-server",
   "license": "Apache-2.0",
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "uniprot", "uniprotkb", "protein", "bioinformatics"],
   "mcpServers": {
     "uniprot-mcp-server": {
       "command": "npx",

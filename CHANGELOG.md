@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.4](changelog/0.2.x/0.2.4.md) — 2026-09-20 · ⚠️ Breaking
+
+The server resolves stateless on every launch path, and an out-of-schema argument is now rejected as InvalidParams carrying a machine-readable reason and recovery hint instead of ValidationError with bare text.
+
 ## [0.2.3](changelog/0.2.x/0.2.3.md) — 2026-08-30
 
 uniprot_map_ids preserves UniProt failed IDs, separates completed-page continuations from running-job tickets, and avoids transferring results during finished status probes.
