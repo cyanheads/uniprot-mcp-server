@@ -1,7 +1,7 @@
 {
   "name": "uniprot-mcp-server",
-  "version": "0.2.4",
-  "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
+  "version": "0.2.5",
+  "description": "Protein research over UniProtKB: search by function, fetch curated records, map IDs, proteomes.",
   "author": {
     "name": "cyanheads",
     "email": "casey@caseyjhand.com",
@@ -14,7 +14,7 @@
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "uniprot-mcp-server",
-    "shortDescription": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
+    "shortDescription": "Protein research over UniProtKB: search by function, fetch curated records, map IDs, proteomes.",
     "longDescription": "The protein-as-primary-entity research workflow over UniProt. Search UniProtKB by function, keyword, GO term, gene, or organism; retrieve full curated Swiss-Prot entries (function, catalytic activity, subcellular location, disease, PTMs, isoforms, sequence, cross-references); map identifiers across 100+ databases via the async ID-mapping service; and pull reference proteomes and taxonomy. Keyless, CC BY 4.0.",
     "developerName": "cyanheads",
     "category": "research",

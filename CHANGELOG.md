@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.5](changelog/0.2.x/0.2.5.md) — 2026-10-08
+
+Adopts mcp-ts-core 0.13.14: error results carry a request ID, uniprot_get_entry rejects an unknown sections name instead of dropping it, numeric strings are accepted for numeric fields, and the Docker image installs dependencies on the build platform.
+
 ## [0.2.4](changelog/0.2.x/0.2.4.md) — 2026-09-20 · ⚠️ Breaking
 
 The server resolves stateless on every launch path, and an out-of-schema argument is now rejected as InvalidParams carrying a machine-readable reason and recovery hint instead of ValidationError with bare text.

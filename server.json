@@ -1,12 +1,12 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.cyanheads/uniprot-mcp-server",
-  "description": "Protein research over UniProtKB — search by function, fetch curated records, map IDs, proteomes.",
+  "description": "Protein research over UniProtKB: search by function, fetch curated records, map IDs, proteomes.",
   "repository": {
     "url": "https://github.com/cyanheads/uniprot-mcp-server",
     "source": "github"
   },
-  "version": "0.2.4",
+  "version": "0.2.5",
   "remotes": [
     {
       "type": "streamable-http",
@@ -18,18 +18,8 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/uniprot-mcp-server",
-      "runtimeHint": "bun",
-      "version": "0.2.4",
-      "packageArguments": [
-        {
-          "type": "positional",
-          "value": "run"
-        },
-        {
-          "type": "positional",
-          "value": "start:stdio"
-        }
-      ],
+      "runtimeHint": "npx",
+      "version": "0.2.5",
       "environmentVariables": [
         {
           "name": "MCP_LOG_LEVEL",
@@ -47,19 +37,15 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/uniprot-mcp-server",
-      "runtimeHint": "bun",
-      "version": "0.2.4",
-      "packageArguments": [
-        {
-          "type": "positional",
-          "value": "run"
-        },
-        {
-          "type": "positional",
-          "value": "start:http"
-        }
-      ],
+      "runtimeHint": "npx",
+      "version": "0.2.5",
       "environmentVariables": [
+        {
+          "name": "MCP_TRANSPORT_TYPE",
+          "description": "Selects the HTTP transport.",
+          "format": "string",
+          "value": "http"
+        },
         {
           "name": "MCP_HTTP_HOST",
           "description": "The hostname for the HTTP server.",
