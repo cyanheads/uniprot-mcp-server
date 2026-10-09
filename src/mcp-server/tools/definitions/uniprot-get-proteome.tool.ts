@@ -185,14 +185,12 @@ export const getProteome = tool('uniprot_get_proteome', {
   async handler(input, ctx) {
     const upid = input.upid?.trim() || undefined;
     if (upid && input.taxon_id) {
-      throw ctx.fail('conflicting_identifier', undefined, {
-        ...ctx.recoveryFor('conflicting_identifier'),
-      });
+      throw ctx.fail('conflicting_identifier');
     }
     // Narrowed union: exactly one identifier survives the guards and reaches the service.
     const target = upid ? { upid } : input.taxon_id ? { taxonId: input.taxon_id } : undefined;
     if (!target) {
-      throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
+      throw ctx.fail('missing_identifier');
     }
 
     const service = getUniProtService();
@@ -201,9 +199,7 @@ export const getProteome = tool('uniprot_get_proteome', {
       proteome = await service.getProteome(target, ctx);
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
-        throw ctx.fail('not_found', err.message, {
-          ...ctx.recoveryFor('not_found'),
-        });
+        throw ctx.fail('not_found', err.message);
       }
       throw err;
     }

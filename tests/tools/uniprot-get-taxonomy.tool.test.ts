@@ -9,7 +9,7 @@
  */
 
 import { JsonRpcErrorCode, notFound } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Taxon, TaxonChild } from '@/services/uniprot/types.js';
 import { expectMcpError } from '../helpers.js';
@@ -102,7 +102,15 @@ describe('getTaxonomy', () => {
     const err = await expectMcpError(getTaxonomy.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'not_found' });
-    expect((err.data as { recovery?: unknown }).recovery).toBeDefined();
+
+    // The framework fills the declared recovery hint onto the envelope.
+    const result = await runToolContract(getTaxonomy, { taxon_id: 99999999 });
+    const envelope = (
+      result.structuredContent as { error?: { data?: { recovery?: { hint?: string } } } }
+    ).error;
+    expect(envelope?.data?.recovery?.hint).toBe(
+      'Check the spelling or the NCBI taxon ID and try again.',
+    );
   });
 
   it('routes a by-name NotFound through ctx.fail("not_found")', async () => {

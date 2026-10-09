@@ -72,9 +72,7 @@ export const getSequence = tool('uniprot_get_sequence', {
       records = await getUniProtService().getFasta(input.accession, input.include_isoforms, ctx);
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
-        throw ctx.fail('not_found', err.message, {
-          ...ctx.recoveryFor('not_found'),
-        });
+        throw ctx.fail('not_found', err.message);
       }
       throw err;
     }

@@ -156,6 +156,17 @@ describe('getEntry handler', () => {
     // The oversized, unrequested section is dropped by the projection.
     expect(entry?.function).toBeUndefined();
   });
+
+  it('rejects an unknown section name on a sections re-call, naming the available keys', async () => {
+    getEntriesMock.mockResolvedValue([fullEntry]);
+    const ctx = createMockContext({ errors: getEntry.errors });
+    const input = getEntry.input.parse({ accessions: ['P04637'], sections: ['diseases'] });
+
+    const err = await expectMcpError(getEntry.handler(input, ctx));
+    expect(err.code).toBe(JsonRpcErrorCode.InvalidParams);
+    expect(err.data).toMatchObject({ unmatched: ['diseases'] });
+    expect((err.data as { available?: string[] }).available).toContain('disease');
+  });
 });
 
 describe('getEntry format', () => {

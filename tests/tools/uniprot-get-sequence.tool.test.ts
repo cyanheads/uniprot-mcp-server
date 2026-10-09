@@ -82,8 +82,9 @@ describe('getSequence', () => {
 
     const err = await expectMcpError(getSequence.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+    // The declared recovery hint is filled in by the framework, not the handler —
+    // the runToolContract suite below pins it on both surfaces.
     expect(err.data).toMatchObject({ reason: 'not_found' });
-    expect((err.data as { recovery?: unknown }).recovery).toBeDefined();
   });
 
   it('returns the canonical sequence and omits isoforms when include_isoforms is false', async () => {

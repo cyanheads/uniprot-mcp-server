@@ -62,8 +62,9 @@ describe('taxonomyResource', () => {
 
     const err = await expectMcpError(taxonomyResource.handler(params, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+    // The declared recovery hint is filled in by the framework's resource
+    // handler, not by this throw site.
     expect(err.data).toMatchObject({ reason: 'not_found', taxonId: '99999999' });
-    expect((err.data as { recovery?: unknown }).recovery).toBeDefined();
   });
 
   it('lets a non-NotFound service error bubble unchanged (not coerced to not_found)', async () => {

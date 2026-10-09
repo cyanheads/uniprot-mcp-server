@@ -61,7 +61,6 @@ export const entryResource = resource('uniprot://entry/{accession}', {
     if (!entry) {
       throw ctx.fail('not_found', `Accession ${params.accession} not found in UniProtKB.`, {
         accession: params.accession,
-        ...ctx.recoveryFor('not_found'),
       });
     }
 

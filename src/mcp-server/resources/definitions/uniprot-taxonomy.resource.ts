@@ -35,10 +35,7 @@ export const taxonomyResource = resource('uniprot://taxonomy/{taxonId}', {
       return await getUniProtService().getTaxonById(Number(params.taxonId), ctx);
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
-        throw ctx.fail('not_found', err.message, {
-          taxonId: params.taxonId,
-          ...ctx.recoveryFor('not_found'),
-        });
+        throw ctx.fail('not_found', err.message, { taxonId: params.taxonId });
       }
       throw err;
     }

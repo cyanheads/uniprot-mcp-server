@@ -345,10 +345,7 @@ export const getEntry = tool('uniprot_get_entry', {
       throw ctx.fail(
         'all_not_found',
         `None of the ${input.accessions.length} accession(s) resolved in UniProtKB.`,
-        {
-          accessions: input.accessions,
-          ...ctx.recoveryFor('all_not_found'),
-        },
+        { accessions: input.accessions },
       );
     }
 

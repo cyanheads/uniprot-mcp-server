@@ -181,10 +181,10 @@ export const searchProteins = tool('uniprot_search_proteins', {
     const textSearch = input.text_search?.trim() ?? '';
     const luceneQuery = input.query?.trim() ?? '';
     if (!textSearch && !luceneQuery) {
-      throw ctx.fail('missing_query', undefined, { ...ctx.recoveryFor('missing_query') });
+      throw ctx.fail('missing_query');
     }
     if (textSearch && luceneQuery) {
-      throw ctx.fail('conflicting_query', undefined, { ...ctx.recoveryFor('conflicting_query') });
+      throw ctx.fail('conflicting_query');
     }
 
     const clauses: string[] = [luceneQuery || textSearch];

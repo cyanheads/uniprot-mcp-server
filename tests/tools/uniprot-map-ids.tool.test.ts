@@ -392,7 +392,17 @@ describe('mapIds completed-page continuation', () => {
     );
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'invalid_continuation' });
-    expect(err.data?.recovery).toBeDefined();
+
+    // The framework fills the declared recovery hint onto the envelope.
+    const contract = await runToolContract(mapIds, {
+      continuation: { jobId: 'expired-job', cursor: 'expired' },
+    });
+    const envelope = (
+      contract.structuredContent as { error?: { data?: { recovery?: { hint?: string } } } }
+    ).error;
+    expect(envelope?.data?.recovery?.hint).toBe(
+      'Restart the mapping job and use each returned continuation before it expires.',
+    );
   });
 });
 

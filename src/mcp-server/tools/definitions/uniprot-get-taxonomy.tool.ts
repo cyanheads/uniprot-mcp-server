@@ -115,14 +115,12 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
   async handler(input, ctx) {
     const name = input.name?.trim();
     if (input.taxon_id && name) {
-      throw ctx.fail('conflicting_identifier', undefined, {
-        ...ctx.recoveryFor('conflicting_identifier'),
-      });
+      throw ctx.fail('conflicting_identifier');
     }
     // Narrowed union: exactly one identifier survives the guards and reaches the service.
     const target = input.taxon_id ? { taxonId: input.taxon_id } : name ? { name } : undefined;
     if (!target) {
-      throw ctx.fail('missing_identifier', undefined, { ...ctx.recoveryFor('missing_identifier') });
+      throw ctx.fail('missing_identifier');
     }
 
     const service = getUniProtService();
@@ -134,9 +132,7 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
           : await service.getTaxonByName(target.name, ctx);
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
-        throw ctx.fail('not_found', err.message, {
-          ...ctx.recoveryFor('not_found'),
-        });
+        throw ctx.fail('not_found', err.message);
       }
       throw err;
     }

@@ -9,7 +9,7 @@
  */
 
 import { JsonRpcErrorCode, notFound } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Proteome, ProteomeProteinPage } from '@/services/uniprot/types.js';
 import { expectMcpError, required } from '../helpers.js';
@@ -107,8 +107,16 @@ describe('getProteome', () => {
     const err = await expectMcpError(getProteome.handler(input, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'not_found' });
-    // Recovery guidance reaches the wire so the agent knows its next move.
-    expect((err.data as { recovery?: unknown }).recovery).toBeDefined();
+
+    // Recovery guidance reaches the wire so the agent knows its next move — the
+    // framework fills the declared hint onto the envelope.
+    const result = await runToolContract(getProteome, { taxon_id: 99999999 });
+    const envelope = (
+      result.structuredContent as { error?: { data?: { recovery?: { hint?: string } } } }
+    ).error;
+    expect(envelope?.data?.recovery?.hint).toBe(
+      'Confirm the organism has a reference proteome, or look it up with uniprot_get_taxonomy.',
+    );
   });
 
   it('returns metadata only when include_proteins is false (taxon-id dispatch)', async () => {

@@ -108,8 +108,9 @@ describe('entryResource', () => {
 
     const err = await expectMcpError(entryResource.handler(params, ctx));
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+    // The declared recovery hint is filled in by the framework's resource
+    // handler, not by this throw site.
     expect(err.data).toMatchObject({ reason: 'not_found', accession: 'Q99999' });
-    expect((err.data as { recovery?: unknown }).recovery).toBeDefined();
   });
 
   it('throws not_found when the result holds only a different accession', async () => {

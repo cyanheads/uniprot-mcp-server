@@ -159,9 +159,7 @@ export const mapIds = tool('uniprot_map_ids', {
       (input.ticket && (input.continuation || hasSubmissionInputs)) ||
       (input.continuation && hasSubmissionInputs)
     ) {
-      throw ctx.fail('conflicting_inputs', undefined, {
-        ...ctx.recoveryFor('conflicting_inputs'),
-      });
+      throw ctx.fail('conflicting_inputs');
     }
 
     const service = getUniProtService();
@@ -177,9 +175,6 @@ export const mapIds = tool('uniprot_map_ids', {
           throw ctx.fail(
             'invalid_ticket',
             `Mapping ticket "${input.ticket}" is unknown or expired.`,
-            {
-              ...ctx.recoveryFor('invalid_ticket'),
-            },
           );
         }
         throw err;
@@ -193,7 +188,6 @@ export const mapIds = tool('uniprot_map_ids', {
           throw ctx.fail(
             'invalid_continuation',
             'The completed mapping page is unknown or expired.',
-            { ...ctx.recoveryFor('invalid_continuation') },
           );
         }
         throw err;
@@ -201,7 +195,7 @@ export const mapIds = tool('uniprot_map_ids', {
     } else {
       mode = 'start';
       if (!input.from_db || !input.to_db || !input.ids?.length) {
-        throw ctx.fail('missing_inputs', undefined, { ...ctx.recoveryFor('missing_inputs') });
+        throw ctx.fail('missing_inputs');
       }
       try {
         result = await service.mapIds(input.from_db, input.to_db, input.ids, input.tax_id, ctx);
@@ -210,7 +204,6 @@ export const mapIds = tool('uniprot_map_ids', {
           throw ctx.fail(
             'unsupported_db_pair',
             `Mapping ${input.from_db} → ${input.to_db} is not supported.`,
-            { ...ctx.recoveryFor('unsupported_db_pair') },
           );
         }
         throw err;
