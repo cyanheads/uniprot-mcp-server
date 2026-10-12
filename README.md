@@ -110,7 +110,7 @@ All resource data is also reachable via tools — tool-only clients lose nothing
 
 - Provide exactly one of `taxon_id` (NCBI numeric ID) or `name` (scientific name) — both or neither fails validation
 - Returns scientific and common name, mnemonic, rank, parent, and the full lineage (root → near ancestor)
-- `include_children` fetches the immediate child taxa via a follow-up search (not inline on the record), 100 per page with the total child count; when more remain, the response carries truncation disclosure and a `cursor` for the next page. The cursor names its taxon, so one sent with another taxon fails `invalid_cursor` before any request
+- `include_children` fetches the immediate child taxa via a follow-up search (not inline on the record), 100 per page with the total child count; when more remain, the response carries truncation disclosure and a `cursor` for the next page. The cursor names its taxon, so one sent with another taxon fails `invalid_cursor` before the children are fetched
 - Turns an organism name into the taxon ID that `uniprot_search_proteins` (`organism_id`) and `uniprot_get_proteome` (`taxon_id`) expect
 
 ---
