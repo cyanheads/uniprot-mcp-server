@@ -10,7 +10,12 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import { ID_MAPPING_FROM_DBS, ID_MAPPING_TO_DBS } from '@/services/uniprot/types.js';
+import {
+  describeInactiveInFull,
+  ID_MAPPING_FROM_DBS,
+  ID_MAPPING_TO_DBS,
+  JOB_ID_REGEX,
+} from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
 const MappingContinuationSchema = z
@@ -23,7 +28,7 @@ const MappingContinuationSchema = z
 export const mapIds = tool('uniprot_map_ids', {
   title: 'uniprot-mcp-server: map IDs',
   description:
-    'Translate identifiers across databases via UniProt\'s ID-mapping service — gene names to accessions, accession to PDB / Ensembl / RefSeq / ChEMBL / GeneID, and back. The job runs asynchronously; this tool submits it and polls within a budget. A running job returns status "running" with a ticket; pass that ticket alone to poll the same job. A completed call returns status "finished" with one results page; when continuation is present, pass it alone to fetch the next completed page without re-submitting or polling the job. A gene name often maps to one reviewed Swiss-Prot accession plus dozens of unreviewed TrEMBL ones, so target UniProtKB-Swiss-Prot (reviewed only) for the usual intent, or UniProtKB / UniProtKB_AC-ID to include TrEMBL. Pair a gene-symbol from_db with tax_id to disambiguate species. Chain the resulting accessions into uniprot_get_entry.',
+    'Translate identifiers across databases via UniProt\'s ID-mapping service — gene names to accessions, accession to PDB / Ensembl / RefSeq / ChEMBL / GeneID, and back. The job runs asynchronously; this tool submits it and polls within a budget. A running job returns status "running" with a ticket; pass that ticket alone to poll the same job. A completed call returns status "finished" with one results page; when continuation is present, pass it alone to fetch the next completed page without re-submitting or polling the job. A gene name often maps to one reviewed Swiss-Prot accession plus dozens of unreviewed TrEMBL ones, so target UniProtKB-Swiss-Prot (reviewed only) for the usual intent, or UniProtKB to include TrEMBL. Pair a gene-symbol from_db with tax_id to disambiguate species. A row whose UniProtKB target is inactive (merged, demerged, or deleted) carries an inactive marker naming its replacements. Chain the resulting active accessions into uniprot_get_entry.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     from_db: z
@@ -36,7 +41,7 @@ export const mapIds = tool('uniprot_map_ids', {
       .enum(ID_MAPPING_TO_DBS)
       .optional()
       .describe(
-        'Target database. UniProtKB-Swiss-Prot = reviewed accessions only (the usual intent); UniProtKB / UniProtKB_AC-ID also include unreviewed TrEMBL. Required only when submitting a new mapping job; omitted when resuming with a ticket or continuation.',
+        'Target database. UniProtKB-Swiss-Prot = reviewed accessions only (the usual intent); UniProtKB also includes unreviewed TrEMBL. Required only when submitting a new mapping job; omitted when resuming with a ticket or continuation.',
       ),
     ids: z
       .array(
@@ -80,6 +85,35 @@ export const mapIds = tool('uniprot_map_ids', {
           .object({
             from: z.string().describe('The source identifier that was mapped.'),
             to: z.string().describe('The resolved target identifier (e.g. a UniProtKB accession).'),
+            inactive: z
+              .object({
+                reason: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'UniProt inactiveReasonType: MERGED, DEMERGED, or DELETED. Omitted when UniProt names none.',
+                  ),
+                replacedBy: z
+                  .array(z.string().describe('A replacement UniProtKB accession.'))
+                  .optional()
+                  .describe(
+                    'Accessions that replace the target — the merge target (MERGED) or the demerge products (DEMERGED).',
+                  ),
+                deletedReason: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Why UniProt deleted the target, when it says. Present on DELETED only.',
+                  ),
+                uniParcId: z
+                  .string()
+                  .optional()
+                  .describe('UniParc ID that still holds the sequence, when UniProt gives one.'),
+              })
+              .optional()
+              .describe(
+                'Present only when the target accession is inactive in UniProtKB — it has no entry to fetch; use replacedBy or uniParcId instead. Absent for an active target.',
+              ),
           })
           .describe('A single from→to mapping.'),
       )
@@ -111,7 +145,9 @@ export const mapIds = tool('uniprot_map_ids', {
     notice: z
       .string()
       .optional()
-      .describe('Status guidance — e.g. that the job is still running, or that no IDs mapped.'),
+      .describe(
+        'Status guidance — e.g. that the job is still running, that no IDs mapped, or that inactive targets could not be marked on this page.',
+      ),
   },
   enrichmentTrailer: {
     unmappedIds: { render: (ids: string[]) => `**Unmapped IDs:** ${ids.join(', ')}` },
@@ -138,13 +174,13 @@ export const mapIds = tool('uniprot_map_ids', {
     {
       reason: 'invalid_ticket',
       code: JsonRpcErrorCode.NotFound,
-      when: 'The resume ticket is unknown or has expired server-side (UniProt holds jobs only temporarily).',
+      when: 'The resume ticket is not a UniProt job ID, or is unknown or has expired server-side (UniProt holds jobs only temporarily).',
       recovery: 'Re-submit the original from_db/to_db/ids to start a fresh mapping job.',
     },
     {
       reason: 'invalid_continuation',
       code: JsonRpcErrorCode.NotFound,
-      when: 'The completed-page continuation refers to a result page that is unknown or expired.',
+      when: 'The completed-page continuation does not carry a UniProt job ID, or refers to a result page that is unknown or expired.',
       recovery: 'Restart the mapping job and use each returned continuation before it expires.',
     },
   ],
@@ -160,6 +196,20 @@ export const mapIds = tool('uniprot_map_ids', {
       (input.continuation && hasSubmissionInputs)
     ) {
       throw ctx.fail('conflicting_inputs');
+    }
+
+    // A ticket or continuation job id becomes a segment of the /idmapping request paths,
+    // so only UniProt's job-id shape (JOB_ID_REGEX) is sent. The input schema stays
+    // pattern-free; the check runs here, before any request.
+    const allowedJobId = 'it may hold only letters, digits, "-", and "_".';
+    if (input.ticket && !JOB_ID_REGEX.test(input.ticket)) {
+      throw ctx.fail('invalid_ticket', `Mapping ticket is not a UniProt job ID: ${allowedJobId}`);
+    }
+    if (input.continuation && !JOB_ID_REGEX.test(input.continuation.jobId)) {
+      throw ctx.fail(
+        'invalid_continuation',
+        `Continuation jobId is not a UniProt job ID: ${allowedJobId}`,
+      );
     }
 
     const service = getUniProtService();
@@ -232,6 +282,11 @@ export const mapIds = tool('uniprot_map_ids', {
     if (result.results.length === 0) {
       ctx.enrich.notice('Completed result page contains no mappings in the target database.');
     }
+    if (result.inactiveUnchecked) {
+      ctx.enrich.notice(
+        `UniProt reports ${result.inactiveUnchecked} inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.`,
+      );
+    }
     ctx.log.info('ID mapping finished', {
       mode,
       ...(input.from_db ? { from: input.from_db } : {}),
@@ -264,6 +319,15 @@ export const mapIds = tool('uniprot_map_ids', {
       } else {
         lines.push('', '| From | To |', '| --- | --- |');
         for (const r of results) lines.push(`| ${r.from} | ${r.to} |`);
+        const inactiveRows = results.filter((r) => r.inactive);
+        if (inactiveRows.length) {
+          lines.push('', '**Inactive targets** (no entry to fetch):');
+          for (const r of inactiveRows) {
+            lines.push(
+              `- ${r.from} → ${describeInactiveInFull({ accession: r.to, ...r.inactive })}`,
+            );
+          }
+        }
       }
     }
     return [{ type: 'text', text: lines.join('\n') }];

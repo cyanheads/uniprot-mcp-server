@@ -10,9 +10,22 @@
 
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IdMappingResult } from '@/services/uniprot/types.js';
-import { expectMcpError, expectRejection, required } from '../helpers.js';
+import {
+  contentText,
+  errorEnvelope,
+  expectMcpError,
+  expectRejection,
+  INACTIVE_MESSAGES,
+  INACTIVE_STUBS,
+  rejectUnmockedFetch,
+  requestedUrls,
+  required,
+  routeUpstream,
+  UNIPROT_400_BODIES,
+  upstreamResponse,
+} from '../helpers.js';
 
 const mapIdsMock = vi.fn();
 const resumeMappingMock = vi.fn();
@@ -28,10 +41,21 @@ vi.mock('@/services/uniprot/uniprot-service.js', () => ({
 
 const { mapIds } = await import('@/mcp-server/tools/definitions/uniprot-map-ids.tool.js');
 
+/** The real service, for tests that drive an upstream response through its sanitizer. */
+const { UniProtService } = await vi.importActual<
+  typeof import('@/services/uniprot/uniprot-service.js')
+>('@/services/uniprot/uniprot-service.js');
+const realService = new UniProtService({} as never, {} as never);
+
 beforeEach(() => {
   mapIdsMock.mockReset();
   resumeMappingMock.mockReset();
   resumeMappingPageMock.mockReset();
+  vi.stubGlobal('fetch', vi.fn(rejectUnmockedFetch));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('mapIds validation', () => {
@@ -60,6 +84,42 @@ describe('mapIds validation', () => {
     expect(() =>
       mapIds.input.parse({ from_db: 'NotADatabase', to_db: 'UniProtKB', ids: ['TP53'] }),
     ).toThrow();
+  });
+
+  it('rejects UniProtKB_AC-ID as a target at input validation, with no service call', async () => {
+    // UniProt answers 400 to to=UniProtKB_AC-ID for every source; it is a source only.
+    const result = await runToolContract(mapIds, {
+      from_db: 'Gene_Name',
+      to_db: 'UniProtKB_AC-ID',
+      ids: ['TP53'],
+      tax_id: 9606,
+    } as never);
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_arguments' });
+    expect(mapIdsMock).not.toHaveBeenCalled();
+  });
+
+  it('still accepts UniProtKB_AC-ID as a source and no surface offers it as a target', async () => {
+    mapIdsMock.mockResolvedValue({
+      status: 'finished',
+      results: [{ from: 'P04637', to: 'P04637' }],
+      failedIds: [],
+    } satisfies IdMappingResult);
+    const result = await runToolContract(mapIds, {
+      from_db: 'UniProtKB_AC-ID',
+      to_db: 'UniProtKB',
+      ids: ['P04637'],
+    });
+    expect(result.isError).toBeFalsy();
+    expect(mapIdsMock).toHaveBeenCalledWith(
+      'UniProtKB_AC-ID',
+      'UniProtKB',
+      ['P04637'],
+      undefined,
+      expect.anything(),
+    );
+    // The descriptions name UniProtKB, not UniProtKB_AC-ID, as the TrEMBL-inclusive target.
+    expect(mapIds.description).not.toMatch(/UniProtKB_AC-ID to include|\/ UniProtKB_AC-ID/);
+    expect(mapIds.input.shape.to_db.description).not.toContain('UniProtKB_AC-ID');
   });
 
   it('rejects an empty completed-page continuation at the schema edge', () => {
@@ -263,6 +323,31 @@ describe('mapIds start path', () => {
     expect(err.message).not.toMatch(/Status: 400|rest\.uniprot\.org/);
   });
 
+  it("keeps unsupported_db_pair for UniProt's real 400 now that the service relays 400 messages", async () => {
+    // Real service (sanitizer included) over a stubbed fetch: the run POST answers the
+    // 400 UniProt sends for PDB → Gene_Name. The service's relayed InvalidParams must
+    // still land on this tool's own reason and message.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(upstreamResponse(400, UNIPROT_400_BODIES.unsupportedDbPair, 'Bad Request')),
+      ),
+    );
+    mapIdsMock.mockImplementation(realService.mapIds.bind(realService));
+
+    const result = await runToolContract(mapIds, {
+      from_db: 'PDB',
+      to_db: 'Gene_Name',
+      ids: ['1TUP'],
+    });
+    const envelope = errorEnvelope(result);
+    expect(envelope.code).toBe(JsonRpcErrorCode.ValidationError);
+    expect(envelope.data).toMatchObject({ reason: 'unsupported_db_pair' });
+    expect(envelope.message).toBe('Mapping PDB → Gene_Name is not supported.');
+    expect(contentText(result)).toContain('(reason unsupported_db_pair');
+    expect(JSON.stringify(result)).not.toMatch(/rest\.uniprot\.org|Bad Request|"url"/);
+  });
+
   it('lets an unrelated service error bubble (not coerced to unsupported_db_pair)', async () => {
     mapIdsMock.mockRejectedValue(new Error('socket hang up'));
     const ctx = createMockContext({ errors: mapIds.errors });
@@ -276,6 +361,154 @@ describe('mapIds start path', () => {
     expect(err.message).toContain('socket hang up');
     expect((err as McpError).data?.reason).toBeUndefined();
   });
+});
+
+describe('mapIds inactive targets (real service, through runToolContract)', () => {
+  /**
+   * A finished UniProtKB-target job, shaped as rest.uniprot.org answers it (probed
+   * 2026-10-12): `/idmapping/results/{job}` carries plain `to` strings plus a
+   * job-wide `obsoleteCount` when any target is inactive; only
+   * `/idmapping/uniprotkb/results/{job}` carries the entry objects with the stub.
+   * `rows` are the uniprotkb-endpoint rows; the generic page is derived from them.
+   */
+  function jobReturns(
+    rows: { from: string; to: { primaryAccession: string; entryType: string } }[],
+  ) {
+    const obsoleteCount = rows.filter((r) => r.to.entryType === 'Inactive').length;
+    const counted = obsoleteCount ? { obsoleteCount } : {};
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname === '/idmapping/run')
+        return upstreamResponse(200, { jobId: 'job-inactive' });
+      if (url.pathname === '/idmapping/status/job-inactive') {
+        return upstreamResponse(200, { jobStatus: 'FINISHED' });
+      }
+      if (url.pathname === '/idmapping/results/job-inactive') {
+        const results = rows.map((r) => ({ from: r.from, to: r.to.primaryAccession }));
+        return upstreamResponse(200, { results, failedIds: [], ...counted });
+      }
+      if (url.pathname === '/idmapping/uniprotkb/results/job-inactive') {
+        return upstreamResponse(200, { results: rows, ...counted });
+      }
+      return;
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    mapIdsMock.mockImplementation(realService.mapIds.bind(realService));
+    return fetchStub;
+  }
+
+  const activeTarget = (accession: string) => ({
+    primaryAccession: accession,
+    entryType: 'UniProtKB reviewed (Swiss-Prot)',
+  });
+
+  it('keeps active targets as bare from/to rows at no extra request (characterization)', async () => {
+    const fetchStub = jobReturns([
+      { from: 'Q13140', to: activeTarget('P02768') },
+      { from: 'P04637', to: activeTarget('P04637') },
+    ]);
+    const result = await runToolContract(mapIds, {
+      from_db: 'UniProtKB_AC-ID',
+      to_db: 'UniProtKB',
+      ids: ['Q13140', 'P04637'],
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as { results: object[] };
+    expect(out.results).toEqual([
+      { from: 'Q13140', to: 'P02768' },
+      { from: 'P04637', to: 'P04637' },
+    ]);
+    expect(contentText(result)).not.toContain('nactive');
+    // run, status, results — nothing more for a job with no inactive target.
+    expect(requestedUrls(fetchStub).map((u) => u.pathname)).toEqual([
+      '/idmapping/run',
+      '/idmapping/status/job-inactive',
+      '/idmapping/results/job-inactive',
+    ]);
+  });
+
+  it('keeps the rows and discloses the gap when the inactive-target lookup fails', async () => {
+    const fetchStub = jobReturns([{ from: 'Q9ZZZ9', to: INACTIVE_STUBS.deletedMappingTarget }]);
+    const route = fetchStub.getMockImplementation();
+    fetchStub.mockImplementation((input: unknown) =>
+      String(input).includes('/idmapping/uniprotkb/results/')
+        ? Promise.resolve(upstreamResponse(404, { messages: ['gone'] }, 'Not Found'))
+        : (route?.(input) ?? Promise.reject(new Error('unrouted'))),
+    );
+    const result = await runToolContract(mapIds, {
+      from_db: 'UniProtKB_AC-ID',
+      to_db: 'UniProtKB',
+      ids: ['Q9ZZZ9'],
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as { results: object[]; notice?: string };
+    expect(out.results).toEqual([{ from: 'Q9ZZZ9', to: 'Q9ZZZ9' }]);
+    expect(out.notice).toBe(
+      'UniProt reports 1 inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.',
+    );
+    expect(contentText(result)).toContain('could not be identified');
+  });
+
+  it.each([
+    [
+      'merged',
+      INACTIVE_STUBS.merged,
+      { reason: 'MERGED', replacedBy: ['P02768'], uniParcId: 'UPI000016A1A8' },
+      INACTIVE_MESSAGES.merged,
+    ],
+    [
+      'demerged',
+      INACTIVE_STUBS.demerged,
+      {
+        reason: 'DEMERGED',
+        replacedBy: ['P0DP25', 'P0DP23', 'P0DP24'],
+        uniParcId: 'UPI0000020B41',
+      },
+      INACTIVE_MESSAGES.demerged,
+    ],
+    [
+      'deleted',
+      INACTIVE_STUBS.deletedMappingTarget,
+      {
+        reason: 'DELETED',
+        deletedReason: 'Not part of a reference proteome',
+        uniParcId: 'UPI000008B5B6',
+      },
+      INACTIVE_MESSAGES.deleted,
+    ],
+  ])(
+    'marks a row whose target is a %s accession with its pointer',
+    async (_type, stub, marker, message) => {
+      const fetchStub = jobReturns([
+        { from: 'GENE1', to: stub },
+        { from: 'P04637', to: activeTarget('P04637') },
+      ]);
+      const result = await runToolContract(mapIds, {
+        from_db: 'Gene_Name',
+        to_db: 'UniProtKB',
+        ids: ['GENE1', 'P04637'],
+        tax_id: 9606,
+      });
+
+      expect(result.isError).toBeFalsy();
+      const out = result.structuredContent as { results: object[]; mappedCount: number };
+      expect(out.results).toEqual([
+        { from: 'GENE1', to: stub.primaryAccession, inactive: marker },
+        { from: 'P04637', to: 'P04637' },
+      ]);
+      // The row stays a mapping — it is not dropped from the count.
+      expect(out.mappedCount).toBe(2);
+      expect(contentText(result)).toContain(message);
+      // Format parity: the marker's uniParcId reaches content[] too.
+      expect(contentText(result)).toContain(marker.uniParcId);
+      // One extra read of the same page from the endpoint that carries the stub.
+      const reread = requestedUrls(fetchStub).at(-1);
+      expect(reread?.pathname).toBe('/idmapping/uniprotkb/results/job-inactive');
+      expect(reread?.searchParams.get('fields')).toBe('accession');
+      expect(reread?.searchParams.get('size')).toBe('500');
+    },
+  );
 });
 
 describe('mapIds resume path', () => {
@@ -330,6 +563,23 @@ describe('mapIds resume path', () => {
     expect(err.data).toMatchObject({ reason: 'invalid_ticket' });
     expect(err.message).not.toMatch(/Status: 404|rest\.uniprot\.org/);
   });
+
+  it.each([
+    ['ticket', { ticket: 'job-1' }, resumeMappingMock],
+    ['continuation', { continuation: { jobId: 'job-1', cursor: 'c1' } }, resumeMappingPageMock],
+  ] as const)(
+    'lets a non-404 failure resuming by %s bubble with its own code, not as an invalid resume input',
+    async (_mode, input, mock) => {
+      mock.mockRejectedValue(
+        new McpError(JsonRpcErrorCode.ServiceUnavailable, 'uniprot.mappingStatus failed upstream.'),
+      );
+      const result = await runToolContract(mapIds, input);
+      const envelope = errorEnvelope(result);
+      expect(envelope.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
+      expect(envelope.message).toBe('uniprot.mappingStatus failed upstream.');
+      expect(envelope.data?.reason).toBeUndefined();
+    },
+  );
 });
 
 describe('mapIds completed-page continuation', () => {
@@ -406,6 +656,83 @@ describe('mapIds completed-page continuation', () => {
   });
 });
 
+describe('mapIds job id shape (real service, through runToolContract)', () => {
+  /** Answer every request as a finished, empty job, so only a pre-request check can fail the call. */
+  function upstreamAnswersEverything() {
+    const fetchStub = routeUpstream(() =>
+      upstreamResponse(200, { jobStatus: 'FINISHED', results: [], failedIds: [] }),
+    );
+    vi.stubGlobal('fetch', fetchStub);
+    resumeMappingMock.mockImplementation(realService.resumeMapping.bind(realService));
+    resumeMappingPageMock.mockImplementation(realService.resumeMappingPage.bind(realService));
+    return fetchStub;
+  }
+
+  const MALFORMED_JOB_IDS = [
+    '../../uniprotkb/search?query=x',
+    'a.b',
+    'job/1',
+    'job 1',
+    'job%2F1',
+    '#',
+  ];
+
+  it.each(MALFORMED_JOB_IDS)(
+    'rejects the malformed job id %j in a ticket as invalid_ticket before any request',
+    async (ticket) => {
+      const fetchStub = upstreamAnswersEverything();
+      const result = await runToolContract(mapIds, { ticket });
+      const envelope = errorEnvelope(result);
+      expect(result.isError).toBe(true);
+      expect(envelope.code).toBe(JsonRpcErrorCode.NotFound);
+      expect(envelope.message).toBe(
+        'Mapping ticket is not a UniProt job ID: it may hold only letters, digits, "-", and "_".',
+      );
+      expect(envelope.data).toMatchObject({ reason: 'invalid_ticket' });
+      expect(contentText(result)).toContain('(reason invalid_ticket');
+      expect(requestedUrls(fetchStub)).toEqual([]);
+    },
+  );
+
+  it.each(MALFORMED_JOB_IDS)(
+    'rejects the malformed job id %j in a continuation as invalid_continuation before any request',
+    async (jobId) => {
+      const fetchStub = upstreamAnswersEverything();
+      const result = await runToolContract(mapIds, { continuation: { jobId, cursor: 'c1' } });
+      const envelope = errorEnvelope(result);
+      expect(result.isError).toBe(true);
+      expect(envelope.code).toBe(JsonRpcErrorCode.NotFound);
+      expect(envelope.message).toBe(
+        'Continuation jobId is not a UniProt job ID: it may hold only letters, digits, "-", and "_".',
+      );
+      expect(envelope.data).toMatchObject({ reason: 'invalid_continuation' });
+      expect(contentText(result)).toContain('(reason invalid_continuation');
+      expect(requestedUrls(fetchStub)).toEqual([]);
+    },
+  );
+
+  it('sends a well-formed job id to the status and results endpoints as one path segment', async () => {
+    const fetchStub = upstreamAnswersEverything();
+    const ticket = await runToolContract(mapIds, { ticket: '3OVYSqg8Mm' });
+    expect(ticket.isError).toBeFalsy();
+    const page = await runToolContract(mapIds, {
+      continuation: { jobId: 'job_42-a', cursor: 'c1' },
+    });
+    expect(page.isError).toBeFalsy();
+    expect(requestedUrls(fetchStub).map((u) => u.pathname)).toEqual([
+      '/idmapping/status/3OVYSqg8Mm',
+      '/idmapping/results/3OVYSqg8Mm',
+      '/idmapping/results/job_42-a',
+    ]);
+  });
+
+  it('keeps the advertised ticket and continuation schemas free of a pattern', () => {
+    const shape = mapIds.input.shape;
+    expect(shape.ticket.safeParse('a.b').success).toBe(true);
+    expect(shape.continuation.safeParse({ jobId: 'a.b', cursor: 'c' }).success).toBe(true);
+  });
+});
+
 describe('mapIds format', () => {
   it('format() renders the finished result as a from→to table', () => {
     const blocks = mapIds.format!({
@@ -446,5 +773,21 @@ describe('mapIds format', () => {
     const blocks = mapIds.format!({ status: 'finished', results: [] });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
     expect(text).toContain('No mappings resolved.');
+  });
+
+  it('format() keeps the mapping table and lists only the inactive targets below it', () => {
+    const blocks = mapIds.format!({
+      status: 'finished',
+      results: [
+        { from: 'P04637', to: 'P04637' },
+        { from: 'Q9ZZZ9', to: 'Q9ZZZ9', inactive: { reason: 'DELETED' } },
+        { from: 'GENE2', to: 'Q00002', inactive: {} },
+      ],
+    });
+    const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
+    expect(text).toContain('| Q9ZZZ9 | Q9ZZZ9 |');
+    expect(text).toContain('- Q9ZZZ9 → Q9ZZZ9 was deleted from UniProtKB.');
+    expect(text).toContain('- GENE2 → Q00002 is inactive in UniProtKB.');
+    expect(text).not.toContain('- P04637 →');
   });
 });

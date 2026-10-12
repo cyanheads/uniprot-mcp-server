@@ -2,14 +2,15 @@
  * @fileoverview uniprot_get_sequence — canonical (and optional isoform)
  *   sequences as FASTA for an accession, parsed into header, sequence, and
  *   length. Kept separate from uniprot_get_entry so sequence-only fetches stay
- *   cheap (FASTA, not the full JSON record).
+ *   cheap (FASTA, not the full JSON record). A merged accession is served as its
+ *   merge target, labelled with the target and `mergedFrom`.
  * @module mcp-server/tools/definitions/uniprot-get-sequence
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import type { SequenceRecord } from '@/services/uniprot/types.js';
-import { ACCESSION_REGEX } from '@/services/uniprot/types.js';
+import type { SequenceResult } from '@/services/uniprot/types.js';
+import { ACCESSION_MESSAGE, ACCESSION_REGEX } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
 const SequenceRecordSchema = z
@@ -27,12 +28,12 @@ const SequenceRecordSchema = z
 export const getSequence = tool('uniprot_get_sequence', {
   title: 'uniprot-mcp-server: get sequence',
   description:
-    'Fetch the canonical amino-acid sequence (FASTA) for a UniProtKB accession, with length and the parsed header. Set include_isoforms to also return the alternatively-spliced isoform sequences. This is the cheap sequence-only path — for the full functional record use uniprot_get_entry. Accessions come from uniprot_search_proteins or uniprot_map_ids; strip any "-N" isoform suffix (P04637-2 to P04637) before calling.',
+    'Fetch the canonical amino-acid sequence (FASTA) for a UniProtKB accession, with length and the parsed header. Set include_isoforms to also return the alternatively-spliced isoform sequences. This is the cheap sequence-only path — for the full functional record use uniprot_get_entry. A merged accession returns the sequences of its merge target, labelled with the target accession and the requested one in mergedFrom; a demerged or deleted accession fails not_found naming its replacements or UniParc ID. Accessions come from uniprot_search_proteins or uniprot_map_ids; strip any "-N" isoform suffix (P04637-2 to P04637) before calling.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     accession: z
       .string()
-      .regex(ACCESSION_REGEX)
+      .regex(ACCESSION_REGEX, ACCESSION_MESSAGE)
       .describe(
         'UniProtKB primary accession, e.g. "P04637". Canonical form only — strip any "-N" isoform suffix.',
       ),
@@ -44,7 +45,17 @@ export const getSequence = tool('uniprot_get_sequence', {
       ),
   }),
   output: z.object({
-    accession: z.string().describe('The accession that was fetched.'),
+    accession: z
+      .string()
+      .describe(
+        'The accession whose sequences are returned — the requested one, or its merge target when mergedFrom is present.',
+      ),
+    mergedFrom: z
+      .string()
+      .optional()
+      .describe(
+        'The requested accession, present only when UniProt merged it into accession; every record here is the merge target. Omitted for an active accession.',
+      ),
     canonical: SequenceRecordSchema.describe('The canonical sequence record.'),
     isoforms: z
       .array(
@@ -61,15 +72,16 @@ export const getSequence = tool('uniprot_get_sequence', {
     {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'The accession has no sequence in UniProtKB.',
-      recovery: 'Verify the accession with uniprot_search_proteins or uniprot_map_ids, then retry.',
+      when: 'The accession has no sequence in UniProtKB — unknown, or demerged or deleted; for an inactive accession the message names its replacements or UniParc ID.',
+      recovery:
+        'Retry with a replacement accession the message names, or verify the accession with uniprot_search_proteins or uniprot_map_ids.',
     },
   ],
 
   async handler(input, ctx) {
-    let records: [SequenceRecord, ...SequenceRecord[]];
+    let served: SequenceResult;
     try {
-      records = await getUniProtService().getFasta(input.accession, input.include_isoforms, ctx);
+      served = await getUniProtService().getFasta(input.accession, input.include_isoforms, ctx);
     } catch (err) {
       if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
         throw ctx.fail('not_found', err.message);
@@ -79,6 +91,7 @@ export const getSequence = tool('uniprot_get_sequence', {
 
     // The first record without an isoform-suffixed id (or simply the first) is canonical.
     // getFasta's return type guarantees at least one record, so records[0] is total.
+    const { records } = served;
     const canonical = records.find((r) => !r.isoformId) ?? records[0];
     const isoforms = records.flatMap((r) =>
       r !== canonical && r.isoformId
@@ -87,13 +100,15 @@ export const getSequence = tool('uniprot_get_sequence', {
     );
 
     ctx.log.info('Sequence fetched', {
-      accession: input.accession,
+      accession: served.accession,
+      ...(served.mergedFrom ? { mergedFrom: served.mergedFrom } : {}),
       length: canonical.length,
       isoforms: isoforms.length,
     });
 
     return {
-      accession: input.accession,
+      accession: served.accession,
+      ...(served.mergedFrom ? { mergedFrom: served.mergedFrom } : {}),
       canonical: {
         header: canonical.header,
         sequence: canonical.sequence,
@@ -106,6 +121,11 @@ export const getSequence = tool('uniprot_get_sequence', {
   format: (result) => {
     const lines = [
       `# ${result.accession} — ${result.canonical.length} aa`,
+      ...(result.mergedFrom
+        ? [
+            `**Merged from:** ${result.mergedFrom} was merged into ${result.accession}; these are ${result.accession}'s sequences.`,
+          ]
+        : []),
       '```fasta',
       `>${result.canonical.header}`,
       result.canonical.sequence,

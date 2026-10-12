@@ -2,14 +2,21 @@
  * @fileoverview uniprot_search_proteins — the discovery entry point. Searches
  *   UniProtKB by free text (`text_search`) or a structured Lucene `query`,
  *   foregrounds the reviewed (Swiss-Prot) filter, optionally returns upstream
- *   facet counts, and walks results with an opaque forward cursor. Chain the
- *   result accessions into uniprot_get_entry.
+ *   facet counts, and walks results with an opaque forward cursor. Inactive
+ *   accessions the query matches are split into inactive[], never built into
+ *   hits. Chain the result accessions into uniprot_get_entry.
  * @module mcp-server/tools/definitions/uniprot-search-proteins
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
-import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import type { SearchPage } from '@/services/uniprot/types.js';
+import {
+  describeInactiveInFull,
+  groupClause,
+  unbalancedParenthesis,
+} from '@/services/uniprot/types.js';
+import { getUniProtService, isCursorRejection } from '@/services/uniprot/uniprot-service.js';
 
 const ProteinHitSchema = z
   .object({
@@ -61,10 +68,36 @@ const ProteinHitSchema = z
   })
   .describe('A UniProtKB search hit.');
 
+const InactiveHitSchema = z
+  .object({
+    accession: z.string().describe('The inactive UniProtKB accession the query matched.'),
+    reason: z
+      .string()
+      .optional()
+      .describe(
+        'UniProt inactiveReasonType: MERGED, DEMERGED, or DELETED. Omitted when UniProt names none.',
+      ),
+    replacedBy: z
+      .array(z.string().describe('A replacement UniProtKB accession.'))
+      .optional()
+      .describe(
+        'Accessions that replace it — the merge target (MERGED) or the demerge products (DEMERGED). Look these up instead.',
+      ),
+    deletedReason: z
+      .string()
+      .optional()
+      .describe('Why UniProt deleted the entry, when it says. Present on DELETED only.'),
+    uniParcId: z
+      .string()
+      .optional()
+      .describe('UniParc ID that still holds the sequence, when UniProt gives one.'),
+  })
+  .describe('An inactive accession the query matched, with where to go instead.');
+
 export const searchProteins = tool('uniprot_search_proteins', {
   title: 'uniprot-mcp-server: search proteins',
   description:
-    'Search UniProtKB and return curated protein records. Pass text_search for a plain-language query (the 80% case) or query for the full Lucene field syntax (gene:TP53 AND organism_id:9606 AND reviewed:true) — exactly one is required. Reviewed (Swiss-Prot) entries are manually curated; unreviewed (TrEMBL) are computationally predicted and ~30x more numerous, so reviewed defaults to true to avoid drowning in predictions — set it false to include TrEMBL. Request facets (e.g. reviewed, model_organism) for server-side count breakdowns. Results page forward with an opaque cursor; UniProtKB has no offset paging. This is the discovery entry point — chain results[].accession into uniprot_get_entry for full records, or uniprot_get_sequence for FASTA.',
+    'Search UniProtKB and return curated protein records. Pass text_search for a plain-language query (the 80% case) or query for the full Lucene field syntax (gene:TP53 AND organism_id:9606 AND reviewed:true) — exactly one is required. Reviewed (Swiss-Prot) entries are manually curated; unreviewed (TrEMBL) are computationally predicted and ~30x more numerous, so reviewed defaults to true to avoid drowning in predictions — set it false to search both tiers together (for TrEMBL only, put reviewed:false in query). The organism_id and reviewed filters apply to the whole query. Request facets (e.g. reviewed, model_organism) for server-side count breakdowns. Results page forward with an opaque cursor; UniProtKB has no offset paging. An inactive accession the query matches (merged, demerged, or deleted) comes back in inactive[] with the accessions that replace it, never as a result. This is the discovery entry point — chain results[].accession into uniprot_get_entry for full records, or uniprot_get_sequence for FASTA.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     text_search: z
@@ -83,7 +116,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .boolean()
       .default(true)
       .describe(
-        'Restrict to reviewed Swiss-Prot entries. Defaults to true (curated only); set false to include unreviewed TrEMBL. Ignored when query already pins a reviewed: clause.',
+        'Restrict to reviewed Swiss-Prot entries. Defaults to true (curated only). false applies no tier filter, returning reviewed and unreviewed TrEMBL entries together; for TrEMBL only, put reviewed:false in query. Ignored when query or text_search already contains a reviewed: clause.',
       ),
     organism_id: z
       .number()
@@ -91,7 +124,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .positive()
       .optional()
       .describe(
-        'Restrict to an NCBI taxon ID, e.g. 9606 for human. A convenience filter ANDed onto the query; resolve names with uniprot_get_taxonomy.',
+        'Restrict to an NCBI taxon ID, e.g. 9606 for human. A convenience filter ANDed onto the whole query; resolve names with uniprot_get_taxonomy.',
       ),
     fields: z
       .string()
@@ -120,7 +153,15 @@ export const searchProteins = tool('uniprot_search_proteins', {
       ),
   }),
   output: z.object({
-    results: z.array(ProteinHitSchema).describe('Matching protein hits for this page.'),
+    results: z
+      .array(ProteinHitSchema)
+      .describe('Matching active protein hits for this page. Inactive accessions are in inactive.'),
+    inactive: z
+      .array(InactiveHitSchema)
+      .optional()
+      .describe(
+        'Matching accessions that are inactive in UniProtKB (merged, demerged, or deleted) — not proteins to read, but pointers to the accessions that replace them. Present only when the page held any.',
+      ),
     facets: z
       .array(
         z
@@ -149,7 +190,9 @@ export const searchProteins = tool('uniprot_search_proteins', {
   enrichment: {
     totalResults: z
       .number()
-      .describe('Total matches for the query before pagination (from the upstream result count).'),
+      .describe(
+        'Total matches for the query before pagination (from the upstream result count), inactive accessions included.',
+      ),
     effectiveQuery: z
       .string()
       .describe('The query as the server assembled and sent it to UniProtKB.'),
@@ -175,6 +218,20 @@ export const searchProteins = tool('uniprot_search_proteins', {
       when: 'Both text_search and query were provided.',
       recovery: 'Provide only one of text_search or query, not both, then retry.',
     },
+    {
+      reason: 'invalid_query',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'The query or text_search has unbalanced parentheses (rejected before any request), or UniProtKB rejected the query, text_search, fields, or facets value — the message names the rejected value.',
+      recovery:
+        'Fix the field name, facet, or syntax named in the message — balance parentheses and quotes, use UniProtKB query and return field names — then retry.',
+    },
+    {
+      reason: 'invalid_cursor',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'UniProt could not continue from the cursor (it answered HTTP 500) — the cursor is malformed or truncated.',
+      recovery:
+        'Re-call with the same query and filters but no cursor to restart from the first page.',
+    },
   ],
 
   async handler(input, ctx) {
@@ -187,41 +244,75 @@ export const searchProteins = tool('uniprot_search_proteins', {
       throw ctx.fail('conflicting_query');
     }
 
-    const clauses: string[] = [luceneQuery || textSearch];
-    if (input.organism_id) clauses.push(`organism_id:${input.organism_id}`);
-    // Honor reviewed unless the caller already pinned a reviewed: clause in their query.
-    if (!/\breviewed:/i.test(clauses.join(' '))) {
-      clauses.push(`reviewed:${input.reviewed}`);
+    const clause = luceneQuery || textSearch;
+    const unbalanced = unbalancedParenthesis(clause);
+    if (unbalanced) {
+      throw ctx.fail(
+        'invalid_query',
+        `Unbalanced parentheses in ${luceneQuery ? 'query' : 'text_search'}: ${unbalanced}.`,
+      );
     }
-    const effectiveQuery = clauses.join(' AND ');
+    // reviewed: true restricts to Swiss-Prot; false adds no tier clause, so both tiers
+    // return. A reviewed: clause the caller wrote wins over either.
+    const callerPinsTier = /\breviewed:/i.test(clause);
+    const filters: string[] = [];
+    if (input.organism_id) filters.push(`organism_id:${input.organism_id}`);
+    if (input.reviewed && !callerPinsTier) filters.push('reviewed:true');
+    // UniProtKB binds AND tighter than OR, so the caller's clause is parenthesized before
+    // any filter is ANDed on — unwrapped, a top-level OR takes the filters on its last
+    // branch only. The balance check above keeps a stray ")" from closing this group early.
+    const effectiveQuery = filters.length
+      ? [groupClause(clause), ...filters].join(' AND ')
+      : clause;
 
-    const page = await getUniProtService().search(
-      effectiveQuery,
-      {
-        ...(input.fields ? { fields: input.fields } : {}),
-        ...(input.facets ? { facets: input.facets } : {}),
-        ...(input.size ? { size: input.size } : {}),
-        ...(input.cursor ? { cursor: input.cursor } : {}),
-      },
-      ctx,
-    );
+    let page: SearchPage;
+    try {
+      page = await getUniProtService().search(
+        effectiveQuery,
+        {
+          ...(input.fields ? { fields: input.fields } : {}),
+          ...(input.facets ? { facets: input.facets } : {}),
+          ...(input.size ? { size: input.size } : {}),
+          ...(input.cursor ? { cursor: input.cursor } : {}),
+        },
+        ctx,
+      );
+    } catch (err) {
+      // The service types a cursor UniProt refused; any other InvalidParams is UniProt's
+      // 400, relayed with UniProt's own message.
+      if (isCursorRejection(err)) {
+        throw ctx.fail('invalid_cursor', (err as Error).message, undefined, { cause: err });
+      }
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
+        throw ctx.fail('invalid_query', err.message, undefined, { cause: err });
+      }
+      throw err;
+    }
 
     ctx.enrich.echo(effectiveQuery);
     ctx.enrich({ totalResults: page.totalResults });
     if (page.cursor) ctx.enrich({ cursor: page.cursor });
-    if (page.results.length === 0) {
+    const tier = callerPinsTier ? 'from query' : input.reviewed ? 'reviewed' : 'both';
+    if (page.results.length === 0 && page.inactive.length === 0) {
       ctx.enrich.notice(
-        `No proteins matched "${effectiveQuery}". Broaden the terms, set reviewed: false to include TrEMBL, or check field syntax.`,
+        tier === 'reviewed'
+          ? `No proteins matched "${effectiveQuery}". Broaden the terms, set reviewed: false to search both Swiss-Prot and unreviewed TrEMBL, or check field syntax.`
+          : `No proteins matched "${effectiveQuery}". Broaden the terms or check field syntax.`,
       );
     }
 
     ctx.log.info('UniProtKB search completed', {
       total: page.totalResults,
       shown: page.results.length,
-      reviewedOnly: input.reviewed,
+      inactive: page.inactive.length,
+      tier,
     });
 
-    return { results: page.results, ...(page.facets ? { facets: page.facets } : {}) };
+    return {
+      results: page.results,
+      ...(page.inactive.length ? { inactive: page.inactive } : {}),
+      ...(page.facets ? { facets: page.facets } : {}),
+    };
   },
 
   format: (result) => {
@@ -241,6 +332,13 @@ export const searchProteins = tool('uniprot_search_proteins', {
       );
       if (hit.geneNames.length) lines.push(`**Genes:** ${hit.geneNames.join(', ')}`);
       if (hit.functionSnippet) lines.push(`**Function:** ${hit.functionSnippet}`);
+      lines.push('');
+    }
+    if (result.inactive?.length) {
+      lines.push('### Inactive accessions');
+      for (const entry of result.inactive) {
+        lines.push(`- **${entry.accession}** — ${describeInactiveInFull(entry)}`);
+      }
       lines.push('');
     }
     if (result.facets?.length) {

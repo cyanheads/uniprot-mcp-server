@@ -13,7 +13,7 @@
 import { resource, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { outlineOnOverflow, selectSections } from '@cyanheads/mcp-ts-core/utils';
-import { ACCESSION_REGEX } from '@/services/uniprot/types.js';
+import { ACCESSION_MESSAGE, ACCESSION_REGEX, describeInactive } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
 /**
@@ -36,12 +36,12 @@ const IDENTITY_FIELDS = [
 export const entryResource = resource('uniprot://entry/{accession}', {
   name: 'UniProtKB entry',
   description:
-    'A curated UniProtKB entry by accession — function, catalytic activity, disease, variants, GO terms, and cross-references. The resource mirror of uniprot_get_entry for a single accession. An annotation-heavy entry over the outline budget returns a bounded identity summary plus a section outline (names + byte sizes) instead of the full record — fetch specific sections with the uniprot_get_entry tool (sections:[...]).',
+    'A curated UniProtKB entry by accession — function, catalytic activity, disease, variants, GO terms, and cross-references. The resource mirror of uniprot_get_entry for a single accession. An inactive accession (merged, demerged, or deleted) fails not_found with a message naming its replacement. An annotation-heavy entry over the outline budget returns a bounded identity summary plus a section outline (names + byte sizes) instead of the full record — fetch specific sections with the uniprot_get_entry tool (sections:[...]).',
   mimeType: 'application/json',
   params: z.object({
     accession: z
       .string()
-      .regex(ACCESSION_REGEX)
+      .regex(ACCESSION_REGEX, ACCESSION_MESSAGE)
       .describe(
         'UniProtKB primary accession, e.g. "P04637". Canonical form only — strip any "-N" isoform suffix.',
       ),
@@ -50,18 +50,26 @@ export const entryResource = resource('uniprot://entry/{accession}', {
     {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'The accession was not found in UniProtKB.',
-      recovery: 'Verify the accession with uniprot_search_proteins or uniprot_map_ids first.',
+      when: 'The accession is unknown to UniProtKB, or inactive (merged, demerged, or deleted); for an inactive accession the message names its replacement or UniParc ID.',
+      recovery:
+        'Read the replacement accession from the message, or verify the accession with uniprot_search_proteins or uniprot_map_ids first.',
     },
   ],
 
   async handler(params, ctx) {
-    const entries = await getUniProtService().getEntries([params.accession], undefined, ctx);
+    const { entries, inactive } = await getUniProtService().getEntries(
+      [params.accession],
+      undefined,
+      ctx,
+    );
     const entry = entries.find((e) => e.accession === params.accession);
     if (!entry) {
-      throw ctx.fail('not_found', `Accession ${params.accession} not found in UniProtKB.`, {
-        accession: params.accession,
-      });
+      const stub = inactive.find((i) => i.accession === params.accession);
+      throw ctx.fail(
+        'not_found',
+        stub ? describeInactive(stub) : `Accession ${params.accession} not found in UniProtKB.`,
+        { accession: params.accession },
+      );
     }
 
     // Cap annotation-heavy entries: outline the record instead of injecting the

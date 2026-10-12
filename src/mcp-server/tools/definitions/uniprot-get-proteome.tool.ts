@@ -9,7 +9,9 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { getServerConfig } from '@/config/server-config.js';
-import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
+import type { ProteomeProteinPage } from '@/services/uniprot/types.js';
+import { unbalancedParenthesis } from '@/services/uniprot/types.js';
+import { getUniProtService, isCursorRejection } from '@/services/uniprot/uniprot-service.js';
 
 const UPID_REGEX = /^UP[0-9]{9}$/;
 
@@ -48,7 +50,13 @@ export const getProteome = tool('uniprot_get_proteome', {
     upid: z
       .union([
         z.literal(''),
-        z.string().regex(UPID_REGEX).describe('Proteome identifier, e.g. "UP000005640".'),
+        z
+          .string()
+          .regex(
+            UPID_REGEX,
+            'Must be a proteome UPID: "UP" followed by 9 digits, e.g. "UP000005640". Or pass taxon_id instead.',
+          )
+          .describe('Proteome identifier, e.g. "UP000005640".'),
       ])
       .optional()
       .describe('Proteome UPID. Provide this OR taxon_id, not both.'),
@@ -180,6 +188,20 @@ export const getProteome = tool('uniprot_get_proteome', {
       recovery:
         'Confirm the organism has a reference proteome, or look it up with uniprot_get_taxonomy.',
     },
+    {
+      reason: 'invalid_query',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'The query filter has unbalanced parentheses (rejected before any request), or UniProtKB rejected it — the message names the rejected field or syntax.',
+      recovery:
+        'Fix the field name or syntax named in the message, balancing parentheses and quotes, or omit query to list the whole proteome.',
+    },
+    {
+      reason: 'invalid_cursor',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'UniProt could not continue from the protein cursor (it answered HTTP 500) — the cursor is malformed or truncated.',
+      recovery:
+        'Re-call with the same proteome, query, and include_proteins but no cursor to restart from the first page.',
+    },
   ],
 
   async handler(input, ctx) {
@@ -191,6 +213,13 @@ export const getProteome = tool('uniprot_get_proteome', {
     const target = upid ? { upid } : input.taxon_id ? { taxonId: input.taxon_id } : undefined;
     if (!target) {
       throw ctx.fail('missing_identifier');
+    }
+    // The filter is sent as "proteome:<upid> AND (<query>)"; a stray ")" would close that
+    // group early, so an unbalanced filter is rejected before any request.
+    const unbalanced =
+      input.include_proteins && input.query ? unbalancedParenthesis(input.query) : undefined;
+    if (unbalanced) {
+      throw ctx.fail('invalid_query', `Unbalanced parentheses in query: ${unbalanced}.`);
     }
 
     const service = getUniProtService();
@@ -209,15 +238,28 @@ export const getProteome = tool('uniprot_get_proteome', {
     }
 
     const cap = input.size ?? getServerConfig().defaultPageSize;
-    const page = await service.getProteomeProteins(
-      proteome.upid,
-      {
-        ...(input.query ? { query: input.query } : {}),
-        size: cap,
-        ...(input.cursor ? { cursor: input.cursor } : {}),
-      },
-      ctx,
-    );
+    let page: ProteomeProteinPage;
+    try {
+      page = await service.getProteomeProteins(
+        proteome.upid,
+        {
+          ...(input.query ? { query: input.query } : {}),
+          size: cap,
+          ...(input.cursor ? { cursor: input.cursor } : {}),
+        },
+        ctx,
+      );
+    } catch (err) {
+      // The service types a cursor UniProt refused; any other InvalidParams is UniProt's
+      // 400, relayed with UniProt's own message.
+      if (isCursorRejection(err)) {
+        throw ctx.fail('invalid_cursor', (err as Error).message, undefined, { cause: err });
+      }
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
+        throw ctx.fail('invalid_query', err.message, undefined, { cause: err });
+      }
+      throw err;
+    }
 
     ctx.enrich({ totalProteinsMatched: page.totalResults });
     if (page.cursor) {

@@ -9,32 +9,24 @@
  * @module tests/tools/uniprot-get-sequence.tool.test
  */
 
-import { JsonRpcErrorCode, notFound } from '@cyanheads/mcp-ts-core/errors';
+import { z } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode, notFound, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, runToolContract } from '@cyanheads/mcp-ts-core/testing';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SequenceRecord } from '@/services/uniprot/types.js';
-import { expectMcpError } from '../helpers.js';
-
-/** The `structuredContent.error` envelope a client reads off a failed call. */
-type ErrorEnvelope = {
-  code: number;
-  message: string;
-  data?: Record<string, unknown>;
-};
-
-/** Read the error envelope out of a `runToolContract` result. */
-function errorEnvelope(result: { structuredContent?: unknown }): ErrorEnvelope {
-  const envelope = (result.structuredContent as { error?: ErrorEnvelope } | undefined)?.error;
-  if (!envelope) throw new Error('Expected the call to return an error envelope.');
-  return envelope;
-}
-
-/** Join a `runToolContract` result's text blocks — the `content[]` surface. */
-function contentText(result: { content: { type: string; text?: string }[] }): string {
-  return result.content
-    .map((block) => (block.type === 'text' ? (block.text ?? '') : ''))
-    .join('\n');
-}
+import { ACCESSION_MESSAGE, ACCESSION_REGEX } from '@/services/uniprot/types.js';
+import {
+  contentText,
+  errorEnvelope,
+  expectMcpError,
+  INACTIVE_MESSAGES,
+  INACTIVE_STUBS,
+  redirectedResponse,
+  rejectUnmockedFetch,
+  requestedUrls,
+  routeUpstream,
+  upstreamResponse,
+} from '../helpers.js';
 
 const getFastaMock = vi.fn();
 
@@ -43,6 +35,12 @@ vi.mock('@/services/uniprot/uniprot-service.js', () => ({
 }));
 
 const { getSequence } = await import('@/mcp-server/tools/definitions/uniprot-get-sequence.tool.js');
+
+/** The real service, for tests that drive upstream responses through getFasta. */
+const { UniProtService } = await vi.importActual<
+  typeof import('@/services/uniprot/uniprot-service.js')
+>('@/services/uniprot/uniprot-service.js');
+const realService = new UniProtService({} as never, {} as never);
 
 const canonicalRecord: SequenceRecord = {
   header:
@@ -60,6 +58,163 @@ const isoformRecord: SequenceRecord = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('fetch', vi.fn(rejectUnmockedFetch));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('getSequence inactive accessions (real service, through runToolContract)', () => {
+  const P53_FASTA = '>sp|P04637|P53_HUMAN Cellular tumor antigen p53\nMEEPQSDPSV\nEPPLSQETFS\n';
+  const P53_ISOFORMS = `${P53_FASTA}>sp|P04637-2|P53_HUMAN Isoform 2 of Cellular tumor antigen p53\nMEEPQSDPSV\n`;
+  const ALBUMIN_FASTA =
+    '>sp|P02768|ALBU_HUMAN Albumin OS=Homo sapiens OX=9606 GN=ALB PE=1 SV=2\nMKWVTFISLL\nFLFSSAYSRG\n';
+  const ALBUMIN_ISOFORMS = `${ALBUMIN_FASTA}>sp|P02768-2|ALBU_HUMAN Isoform 2 of Albumin OS=Homo sapiens OX=9606 GN=ALB\nMKWVTFISLL\n`;
+  const STUBS: Record<string, object> = {
+    Q13140: INACTIVE_STUBS.merged,
+    P62158: INACTIVE_STUBS.demerged,
+    Q9ZZZ9: INACTIVE_STUBS.deleted,
+  };
+
+  /**
+   * UniProt as probed live: the per-accession .fasta follows a merge's 303 to the
+   * target, answers a demerged/deleted accession 200 with an empty body, and 404s an
+   * unknown one; the isoform FASTA search is empty for every inactive accession; the
+   * JSON search returns the inactive stub.
+   */
+  function upstream() {
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname === '/uniprotkb/P04637.fasta') return upstreamResponse(200, P53_FASTA);
+      if (url.pathname === '/uniprotkb/Q13140.fasta') {
+        return redirectedResponse(
+          'https://rest.uniprot.org/uniprotkb/P02768.fasta?from=Q13140',
+          ALBUMIN_FASTA,
+        );
+      }
+      if (
+        url.pathname === '/uniprotkb/P62158.fasta' ||
+        url.pathname === '/uniprotkb/Q9ZZZ9.fasta'
+      ) {
+        return upstreamResponse(200, '');
+      }
+      if (url.pathname === '/uniprotkb/Q00000.fasta') {
+        return upstreamResponse(404, 'Error encountered when streaming data.', 'Not Found');
+      }
+      if (url.pathname !== '/uniprotkb/search') return;
+      const query = url.searchParams.get('query') ?? '';
+      if (url.searchParams.get('format') === 'fasta') {
+        if (query === 'accession:P04637') return upstreamResponse(200, P53_ISOFORMS);
+        if (query === 'accession:P02768') return upstreamResponse(200, ALBUMIN_ISOFORMS);
+        return upstreamResponse(200, '');
+      }
+      const accession = query.match(/^accession:\((\w+)\)$/)?.[1] ?? '';
+      const stub = STUBS[accession];
+      return upstreamResponse(200, { results: stub ? [stub] : [] });
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    getFastaMock.mockImplementation(realService.getFasta.bind(realService));
+    return fetchStub;
+  }
+
+  type SequenceOut = {
+    accession: string;
+    mergedFrom?: string;
+    canonical: { header: string };
+    isoforms?: { isoformId: string; header: string }[];
+  };
+
+  it.each([false, true])(
+    'returns an active accession labelled as requested in one request, no redirect (characterization, include_isoforms %s)',
+    async (include_isoforms) => {
+      const fetchStub = upstream();
+      const result = await runToolContract(getSequence, { accession: 'P04637', include_isoforms });
+
+      expect(result.isError).toBeFalsy();
+      const out = result.structuredContent as SequenceOut;
+      expect(out.accession).toBe('P04637');
+      expect(Object.keys(out).sort()).toEqual(
+        include_isoforms ? ['accession', 'canonical', 'isoforms'] : ['accession', 'canonical'],
+      );
+      expect(contentText(result)).not.toContain('merged');
+      expect(fetchStub).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('follows a merged accession to the target and labels the sequence with the target', async () => {
+    const fetchStub = upstream();
+    const result = await runToolContract(getSequence, { accession: 'Q13140' });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as SequenceOut;
+    expect(out.accession).toBe('P02768');
+    expect(out.mergedFrom).toBe('Q13140');
+    expect(out.canonical.header).toContain('|P02768|');
+    const text = contentText(result);
+    expect(text).toContain('Q13140 was merged into P02768');
+    expect(text).toContain('# P02768');
+    // The redirect rode the one request the active path also makes.
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  it('follows a merged accession with include_isoforms, returning the target canonical and isoforms', async () => {
+    const fetchStub = upstream();
+    const result = await runToolContract(getSequence, {
+      accession: 'Q13140',
+      include_isoforms: true,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as SequenceOut;
+    expect(out.accession).toBe('P02768');
+    expect(out.mergedFrom).toBe('Q13140');
+    expect(out.canonical.header).toContain('|P02768|');
+    expect(out.isoforms?.map((i) => i.isoformId)).toEqual(['P02768-2']);
+    for (const iso of out.isoforms ?? []) expect(iso.header).toContain('|P02768-');
+    expect(contentText(result)).toContain('Q13140 was merged into P02768');
+    // Empty isoform search → one stub lookup → the target's isoform search.
+    const urls = requestedUrls(fetchStub);
+    expect(urls.map((u) => u.searchParams.get('query'))).toEqual([
+      'accession:Q13140',
+      'accession:(Q13140)',
+      'accession:P02768',
+    ]);
+  });
+
+  it.each([
+    ['demerged', 'P62158', false, INACTIVE_MESSAGES.demerged],
+    ['demerged', 'P62158', true, INACTIVE_MESSAGES.demerged],
+    ['deleted', 'Q9ZZZ9', false, INACTIVE_MESSAGES.deleted],
+    ['deleted', 'Q9ZZZ9', true, INACTIVE_MESSAGES.deleted],
+  ])(
+    'returns not_found naming the pointer for a %s accession %s (include_isoforms %s)',
+    async (_type, accession, include_isoforms, message) => {
+      const fetchStub = upstream();
+      const result = await runToolContract(getSequence, { accession, include_isoforms });
+
+      expect(result.isError).toBe(true);
+      const envelope = errorEnvelope(result);
+      expect(envelope.code).toBe(JsonRpcErrorCode.NotFound);
+      expect(envelope.data).toMatchObject({ reason: 'not_found' });
+      expect(envelope.message).toBe(message);
+      expect(contentText(result)).toContain(message);
+      // The empty body costs one stub lookup, on this failure path only.
+      expect(fetchStub).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([false, true])(
+    'keeps the existing not_found text for an unknown accession (characterization, include_isoforms %s)',
+    async (include_isoforms) => {
+      upstream();
+      const result = await runToolContract(getSequence, { accession: 'Q00000', include_isoforms });
+
+      const envelope = errorEnvelope(result);
+      expect(envelope.code).toBe(JsonRpcErrorCode.NotFound);
+      expect(envelope.data).toMatchObject({ reason: 'not_found' });
+      expect(envelope.message).toBe('No sequence found for accession Q00000.');
+    },
+  );
 });
 
 describe('getSequence', () => {
@@ -87,8 +242,19 @@ describe('getSequence', () => {
     expect(err.data).toMatchObject({ reason: 'not_found' });
   });
 
+  it('lets a non-404 service failure bubble with its own code, not as not_found', async () => {
+    getFastaMock.mockRejectedValue(
+      serviceUnavailable('uniprot.getFasta failed upstream (-32000).'),
+    );
+    const result = await runToolContract(getSequence, { accession: 'P04637' });
+    const envelope = errorEnvelope(result);
+    expect(envelope.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
+    expect(envelope.message).toBe('uniprot.getFasta failed upstream (-32000).');
+    expect(envelope.data?.reason).toBeUndefined();
+  });
+
   it('returns the canonical sequence and omits isoforms when include_isoforms is false', async () => {
-    getFastaMock.mockResolvedValue([canonicalRecord]);
+    getFastaMock.mockResolvedValue({ accession: 'P04637', records: [canonicalRecord] });
     const ctx = createMockContext({ errors: getSequence.errors });
     const input = getSequence.input.parse({ accession: 'P04637' });
 
@@ -102,7 +268,10 @@ describe('getSequence', () => {
 
   it('selects the non-isoform record as canonical and returns isoforms when requested', async () => {
     // Service returns isoform first; handler must still pick the canonical (no -N id) record.
-    getFastaMock.mockResolvedValue([isoformRecord, canonicalRecord]);
+    getFastaMock.mockResolvedValue({
+      accession: 'P04637',
+      records: [isoformRecord, canonicalRecord],
+    });
     const ctx = createMockContext({ errors: getSequence.errors });
     const input = getSequence.input.parse({ accession: 'P04637', include_isoforms: true });
 
@@ -116,7 +285,7 @@ describe('getSequence', () => {
   });
 
   it('omits the isoforms key when include_isoforms is true but none exist', async () => {
-    getFastaMock.mockResolvedValue([canonicalRecord]);
+    getFastaMock.mockResolvedValue({ accession: 'P04637', records: [canonicalRecord] });
     const ctx = createMockContext({ errors: getSequence.errors });
     const input = getSequence.input.parse({ accession: 'P04637', include_isoforms: true });
 
@@ -165,11 +334,34 @@ describe('getSequence error envelope (through runToolContract)', () => {
     expect(envelope.code).toBe(JsonRpcErrorCode.InvalidParams);
     expect(envelope.code).toBe(-32602);
     expect(envelope.data).toMatchObject({ reason: 'invalid_arguments' });
-    // Containment, not byte-equality: the message embeds the compiled regex and
-    // the reason trailer, both of which move with the framework.
+    // Containment, not byte-equality: the message prefix and the reason trailer
+    // move with the framework.
     expect(contentText(result)).toContain('accession');
     expect(contentText(result)).toContain('(reason invalid_arguments)');
     expect(getFastaMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['not-a-valid-accession!!', 'P04637-2'])(
+    'rejects malformed accession %s with the human-readable accession message, not the compiled pattern',
+    async (accession) => {
+      const result = await runToolContract(getSequence, { accession } as never);
+
+      const envelope = errorEnvelope(result);
+      expect(envelope.code).toBe(JsonRpcErrorCode.InvalidParams);
+      expect(envelope.data).toMatchObject({ reason: 'invalid_arguments' });
+      const expected = `accession: ${ACCESSION_MESSAGE}`;
+      expect(envelope.message).toContain(expected);
+      expect(contentText(result)).toContain(expected);
+      expect(envelope.message).not.toContain('must match pattern');
+      expect(contentText(result)).not.toContain('[OPQ]');
+      expect(getFastaMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('advertises the accession constraint as a bare pattern — the message is not in the schema', () => {
+    const schema = JSON.stringify(z.toJSONSchema(getSequence.input));
+    expect(schema).toContain(JSON.stringify(ACCESSION_REGEX.source));
+    expect(schema).not.toContain('Must be a UniProtKB');
   });
 
   it('renders an omitted required field as missing, with a Recovery hint on both surfaces', async () => {
@@ -195,7 +387,7 @@ describe('getSequence error envelope (through runToolContract)', () => {
     expect(envelope.data).toMatchObject({ reason: 'not_found' });
 
     const text = contentText(result);
-    expect(text).toContain('Recovery: Verify the accession');
+    expect(text).toContain('Recovery: Retry with a replacement accession the message names');
     expect(text).toContain('(reason not_found)');
   });
 

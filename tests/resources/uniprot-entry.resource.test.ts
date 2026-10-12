@@ -9,9 +9,18 @@
 
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/services/uniprot/types.js';
-import { expectMcpError, required } from '../helpers.js';
+import { ACCESSION_MESSAGE } from '@/services/uniprot/types.js';
+import {
+  expectMcpError,
+  INACTIVE_MESSAGES,
+  INACTIVE_STUBS,
+  rejectUnmockedFetch,
+  required,
+  routeUpstream,
+  upstreamResponse,
+} from '../helpers.js';
 
 const getEntriesMock = vi.fn();
 
@@ -41,8 +50,24 @@ const p53: Entry = {
   function: [{ value: 'Acts as a tumor suppressor.' }],
 };
 
+/** The real service, for tests that drive an upstream response through its normalizer. */
+const { UniProtService } = await vi.importActual<
+  typeof import('@/services/uniprot/uniprot-service.js')
+>('@/services/uniprot/uniprot-service.js');
+const realService = new UniProtService({} as never, {} as never);
+
+/** A service batch result holding only active entries. */
+function batch(...entries: Entry[]) {
+  return { entries, inactive: [] };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubGlobal('fetch', vi.fn(rejectUnmockedFetch));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const paramsSchema = required(entryResource.params, 'entryResource.params');
@@ -52,8 +77,15 @@ describe('entryResource', () => {
     expect(() => paramsSchema.parse({ accession: 'lowercase' })).toThrow();
   });
 
+  it('names the accession format and where to find one, not the compiled pattern', () => {
+    const parsed = paramsSchema.safeParse({ accession: 'not-valid' });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => i.message)).toEqual([ACCESSION_MESSAGE]);
+    expect(parsed.error?.message).not.toContain('must match pattern');
+  });
+
   it('returns the full curated entry for an accession within the outline budget', async () => {
-    getEntriesMock.mockResolvedValue([p53]);
+    getEntriesMock.mockResolvedValue(batch(p53));
     const ctx = createMockContext({ errors: entryResource.errors });
     const params = paramsSchema.parse({ accession: 'P04637' });
 
@@ -79,7 +111,7 @@ describe('entryResource', () => {
         featureId: `VAR_${String(i).padStart(6, '0')}`,
       })),
     };
-    getEntriesMock.mockResolvedValue([heavyEntry]);
+    getEntriesMock.mockResolvedValue(batch(heavyEntry));
     const ctx = createMockContext({ errors: entryResource.errors });
     const params = paramsSchema.parse({ accession: 'P04637' });
 
@@ -102,7 +134,7 @@ describe('entryResource', () => {
 
   it('throws ctx.fail("not_found") when the accession is absent from the batch result', async () => {
     // Well-formed accession, but UniProtKB returns no matching entry.
-    getEntriesMock.mockResolvedValue([]);
+    getEntriesMock.mockResolvedValue(batch());
     const ctx = createMockContext({ errors: entryResource.errors });
     const params = paramsSchema.parse({ accession: 'Q99999' });
 
@@ -113,9 +145,35 @@ describe('entryResource', () => {
     expect(err.data).toMatchObject({ reason: 'not_found', accession: 'Q99999' });
   });
 
+  it.each([
+    ['merged', INACTIVE_STUBS.merged, INACTIVE_MESSAGES.merged],
+    ['demerged', INACTIVE_STUBS.demerged, INACTIVE_MESSAGES.demerged],
+    ['deleted', INACTIVE_STUBS.deleted, INACTIVE_MESSAGES.deleted],
+  ])(
+    'throws not_found naming the pointer for a %s accession instead of a hollow body',
+    async (_type, stub, message) => {
+      // Real service over a stubbed fetch answering the batch search with the inactive stub.
+      const fetchStub = routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, { results: [stub] })
+          : undefined,
+      );
+      vi.stubGlobal('fetch', fetchStub);
+      getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+      const ctx = createMockContext({ errors: entryResource.errors });
+      const params = paramsSchema.parse({ accession: stub.primaryAccession });
+
+      const err = await expectMcpError(entryResource.handler(params, ctx));
+      expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+      expect(err.message).toBe(message);
+      expect(err.data).toMatchObject({ reason: 'not_found', accession: stub.primaryAccession });
+      expect(fetchStub).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('throws not_found when the result holds only a different accession', async () => {
     // A mismatched record must not be returned for the requested accession.
-    getEntriesMock.mockResolvedValue([p53]);
+    getEntriesMock.mockResolvedValue(batch(p53));
     const ctx = createMockContext({ errors: entryResource.errors });
     const params = paramsSchema.parse({ accession: 'P38398' });
 

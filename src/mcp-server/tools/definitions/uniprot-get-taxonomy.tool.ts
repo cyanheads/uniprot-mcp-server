@@ -1,7 +1,8 @@
 /**
  * @fileoverview uniprot_get_taxonomy — a taxonomy record by NCBI taxon ID or
  *   scientific name: scientific/common name, rank, full lineage, and optionally
- *   the immediate children (a follow-up search, not inline on the record).
+ *   one cursor-paginated page of immediate children (a follow-up search, not
+ *   inline on the record) with the total and truncation disclosure.
  *   Resolves organism filters for uniprot_search_proteins and grounds
  *   cross-server taxonomy.
  * @module mcp-server/tools/definitions/uniprot-get-taxonomy
@@ -9,6 +10,8 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import type { TaxonChild, TaxonChildrenPage } from '@/services/uniprot/types.js';
+import { TAXON_CHILDREN_PAGE_SIZE } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
 const LineageEntrySchema = z
@@ -23,7 +26,7 @@ const LineageEntrySchema = z
 export const getTaxonomy = tool('uniprot_get_taxonomy', {
   title: 'uniprot-mcp-server: get taxonomy',
   description:
-    'Resolve a taxonomy record by NCBI taxon ID (e.g. 9606) or scientific name (e.g. "Homo sapiens") — provide exactly one. Returns the scientific and common name, mnemonic, rank, parent, and the full lineage. Set include_children to also fetch immediate child taxa (a separate lookup — not inline on the record). Use this to turn an organism name into the taxon ID that uniprot_search_proteins (organism_id) and uniprot_get_proteome (taxon_id) expect.',
+    'Resolve a taxonomy record by NCBI taxon ID (e.g. 9606) or scientific name (e.g. "Homo sapiens") — provide exactly one. Returns the scientific and common name, mnemonic, rank, parent, and the full lineage. Set include_children to also fetch immediate child taxa (a separate lookup — not inline on the record) in pages of 100 with the total child count; when more remain, pass the returned cursor to fetch the next page. Use this to turn an organism name into the taxon ID that uniprot_search_proteins (organism_id) and uniprot_get_proteome (taxon_id) expect.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     taxon_id: z
@@ -42,7 +45,13 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
       .boolean()
       .default(false)
       .describe(
-        'When true, also fetch the immediate child taxa via a follow-up search. Defaults to false.',
+        'When true, also fetch a page of up to 100 immediate child taxa via a follow-up search. Defaults to false.',
+      ),
+    cursor: z
+      .string()
+      .optional()
+      .describe(
+        'Forward-pagination cursor from a prior children page, for the next page of the same taxon; a cursor issued for another taxon is rejected. Only meaningful with include_children.',
       ),
   }),
   output: z.object({
@@ -83,13 +92,35 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
           .describe('An immediate child taxon.'),
       )
       .optional()
-      .describe('Immediate children. Present only when include_children is true.'),
+      .describe(
+        'One page of immediate children (up to 100). Present only when include_children is true.',
+      ),
   }),
   enrichment: {
     childCount: z
       .number()
       .optional()
-      .describe('Number of immediate children returned (when include_children is true).'),
+      .describe('Number of immediate children on this page (when include_children is true).'),
+    totalChildren: z
+      .number()
+      .optional()
+      .describe(
+        'Total immediate children of the taxon across all pages (when include_children is true).',
+      ),
+    truncated: z
+      .boolean()
+      .optional()
+      .describe('True when more children remain past this page — fetch them with cursor.'),
+    shown: z.number().optional().describe('Number of children on this page, when more remain.'),
+    cap: z.number().optional().describe('The page size that was applied, when more remain.'),
+    cursor: z
+      .string()
+      .optional()
+      .describe('Forward cursor for the next children page. Absent on the last page.'),
+    notice: z
+      .string()
+      .optional()
+      .describe('Paging guidance when more children remain — the total and how to continue.'),
   },
   errors: [
     {
@@ -109,6 +140,13 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
       code: JsonRpcErrorCode.NotFound,
       when: 'The taxon ID or name did not resolve to a record.',
       recovery: 'Check the spelling or the NCBI taxon ID and try again.',
+    },
+    {
+      reason: 'invalid_cursor',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'The cursor was issued for another taxon, is malformed, or UniProt could not continue from it.',
+      recovery:
+        'Re-call with the same taxon and include_children but no cursor to restart from the first page.',
     },
   ],
 
@@ -137,10 +175,39 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
       throw err;
     }
 
-    let children: Awaited<ReturnType<typeof service.getChildren>> | undefined;
+    let children: TaxonChild[] | undefined;
     if (input.include_children) {
-      children = await service.getChildren(taxon.taxonId, ctx);
-      ctx.enrich({ childCount: children.length });
+      // UniProt answers another taxon's cursor with a page from the middle of this taxon's
+      // list, so the emitted cursor is "<taxonId>.<upstream cursor>" and checked here. The
+      // split is at the first "." because UniProt's own part could hold one.
+      let upstreamCursor: string | undefined;
+      if (input.cursor) {
+        const dot = input.cursor.indexOf('.');
+        upstreamCursor = input.cursor.slice(dot + 1);
+        if (dot === -1 || input.cursor.slice(0, dot) !== String(taxon.taxonId) || !upstreamCursor) {
+          throw ctx.fail(
+            'invalid_cursor',
+            `The cursor was not issued for the children of taxon ${taxon.taxonId}.`,
+          );
+        }
+      }
+      // A cursor UniProt cannot continue from arrives from the service already carrying
+      // reason invalid_cursor; the framework fills its recovery hint from this contract.
+      const page: TaxonChildrenPage = await service.getChildren(
+        taxon.taxonId,
+        upstreamCursor ? { cursor: upstreamCursor } : {},
+        ctx,
+      );
+      children = page.children;
+      ctx.enrich({ childCount: children.length, totalChildren: page.totalChildren });
+      if (page.cursor) {
+        ctx.enrich.truncated({
+          shown: children.length,
+          cap: TAXON_CHILDREN_PAGE_SIZE,
+          guidance: `This page lists ${children.length} of ${page.totalChildren} immediate children. Pass cursor to fetch the next page.`,
+        });
+        ctx.enrich({ cursor: `${taxon.taxonId}.${page.cursor}` });
+      }
     }
 
     ctx.log.info('Taxonomy resolved', {
@@ -169,9 +236,10 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
         )
         .join(' > ')}`,
     );
-    if (result.children?.length) {
+    if (result.children) {
       lines.push(`## Children (${result.children.length})`);
-      for (const c of result.children.slice(0, 50))
+      if (!result.children.length) lines.push('No immediate child taxa.');
+      for (const c of result.children)
         lines.push(`- ${c.scientificName} [${c.taxonId}] (${c.rank})`);
     }
     return [{ type: 'text', text: lines.join('\n') }];

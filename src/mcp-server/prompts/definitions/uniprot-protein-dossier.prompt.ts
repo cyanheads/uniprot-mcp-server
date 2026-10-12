@@ -40,7 +40,7 @@ Follow this workflow with the uniprot-mcp-server tools:
 
 1. Resolve the identifier to a UniProtKB accession. If it looks like a gene name, use uniprot_map_ids (from_db: Gene_Name, to_db: UniProtKB-Swiss-Prot${args.organism ? ', plus the tax_id' : ''}) to get the reviewed accession. If it is already an accession (matches the [OPQ]... pattern), skip this step. If it is a free-text protein name, use uniprot_search_proteins (text_search, reviewed: true) and take the top hit's accession.
 
-2. Fetch the full curated record with uniprot_get_entry for that accession. If the response comes back as an outline, re-call with sections covering function, catalyticActivity, subcellularLocation, disease, variants, goTerms, and xrefs.
+2. Fetch the full curated record with uniprot_get_entry for that accession. If the response comes back as an outline, re-call with sections covering function, catalyticActivity, subcellularLocation, disease, goTerms, and xrefs. Fetch variants in a re-call of its own, and when the outline lists it far over the budget, page it with sections: ["variants"], section_limit, and section_offset.
 
 3. From the entry, summarize: protein function, catalytic activity, subcellular location, and the annotation provenance (reviewed status, annotation score, protein-existence level).
 

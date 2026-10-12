@@ -3,17 +3,18 @@
  *   accession in batch (≤ 20). Returns partial-success output (succeeded[] +
  *   failed[]) so the agent knows which accessions resolved. When a single
  *   record exceeds the context budget, the response switches to a section
- *   outline (kind: 'outline'); the agent re-calls with sections:[...] to pull
- *   only the sections it needs. Entries do not search — accessions come from
+ *   outline (kind: 'outline'); the agent re-calls that one accession with
+ *   sections:[...] to pull only the sections it needs, paging a list section
+ *   still too large on its own with section_limit/section_offset. Entries do not search — accessions come from
  *   uniprot_search_proteins or uniprot_map_ids.
  * @module mcp-server/tools/definitions/uniprot-get-entry
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
-import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { outlineOnOverflow, selectSections } from '@cyanheads/mcp-ts-core/utils';
-import type { Entry } from '@/services/uniprot/types.js';
-import { ACCESSION_REGEX } from '@/services/uniprot/types.js';
+import type { Entry, InactiveEntry } from '@/services/uniprot/types.js';
+import { ACCESSION_MESSAGE, ACCESSION_REGEX, describeInactive } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
 const EvidencedTextSchema = z
@@ -231,17 +232,51 @@ const EntrySchema = z
   })
   .describe('A full curated UniProtKB entry.');
 
+/** Every section key the tool emits — the keys `sections` may name. */
+const SECTION_KEYS = Object.keys(EntrySchema.shape);
+
+/**
+ * Canonical section key by lowercased key. The 21 keys are distinct ignoring case,
+ * so `Function` or `GOTERMS` maps to exactly one key (`function`, `goTerms`).
+ */
+const SECTION_KEY_BY_LOWERCASE = new Map(SECTION_KEYS.map((k) => [k.toLowerCase(), k]));
+
+/** List-valued sections — the ones section_limit/section_offset can window. */
+const LIST_SECTION_KEYS = Object.entries(EntrySchema.shape)
+  .filter(
+    ([, field]) => (field instanceof z.ZodOptional ? field.unwrap() : field) instanceof z.ZodArray,
+  )
+  .map(([key]) => key);
+
+/** Items format() renders per capped list on an unbounded call; a windowed section renders whole. */
+const LIST_CAP = 25;
+/** Ids format() renders per cross-reference database. */
+const XREF_CAP = 30;
+
+/** Identity keys a `sections` projection always keeps, so the slice still names its protein. */
+const IDENTITY_KEYS = [
+  'accession',
+  'entryName',
+  'proteinName',
+  'genes',
+  'organism',
+  'length',
+  'reviewed',
+  'annotationScore',
+  'proteinExistence',
+];
+
 export const getEntry = tool('uniprot_get_entry', {
   title: 'uniprot-mcp-server: get entry',
   description:
-    'Fetch full curated UniProtKB entries by accession in one batch (up to 20). Each entry carries function, catalytic activity, cofactors, subcellular location, disease involvement, PTMs, natural variants, isoforms, domains, GO terms, keywords, and cross-references. Partial failures do not abort the batch — resolved entries land in succeeded[] and unknown/withdrawn accessions in failed[]. Pass fields to trim the upstream projection. A single oversized record returns kind: "outline" (a section listing with byte sizes) instead of overflowing context — re-call the same accession with sections:[...] (e.g. ["disease","variants"]) to pull only those. This tool does not search: accessions come from uniprot_search_proteins.results[].accession or uniprot_map_ids. Strip any isoform suffix (P04637-2 to P04637) before calling.',
+    'Fetch full curated UniProtKB entries by accession in one batch (up to 20). Each entry carries function, catalytic activity, cofactors, subcellular location, disease involvement, PTMs, natural variants, isoforms, domains, GO terms, keywords, and cross-references. Partial failures do not abort the batch — resolved entries land in succeeded[] and unknown or inactive (merged, demerged, deleted) accessions in failed[], where the error for an inactive accession names the accession to retry with or the UniParc ID that keeps its sequence. Pass fields to trim the upstream projection. A single oversized record returns kind: "outline" (a section listing with byte sizes) instead of overflowing context — re-call the same accession with sections:[...] (e.g. ["disease","variants"]) to pull only those. sections takes exactly one accession; trim a batch with fields instead. A list section too large on its own (the natural variants of p53, over a thousand) pages with section_limit/section_offset on a re-call naming that one section. This tool does not search: accessions come from uniprot_search_proteins.results[].accession or uniprot_map_ids. Strip any isoform suffix (P04637-2 to P04637) before calling.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     accessions: z
       .array(
         z
           .string()
-          .regex(ACCESSION_REGEX)
+          .regex(ACCESSION_REGEX, ACCESSION_MESSAGE)
           .describe(
             'A UniProtKB primary accession, e.g. "P04637". Canonical form only — strip any "-N" isoform suffix.',
           ),
@@ -265,7 +300,24 @@ export const getEntry = tool('uniprot_get_entry', {
       )
       .optional()
       .describe(
-        'Only used to re-call after a kind: "outline" response — pass a subset of the outlined section keys to fetch just those sections. Do not pass on the initial call.',
+        'Only used to re-call one accession after a kind: "outline" response — pass a subset of the outlined section keys to fetch just those sections. Requires exactly one accession: a batch with sections is rejected, so trim a batch with fields. A requested section the record lacks is named in absentSections, not an error. Do not pass on the initial call.',
+      ),
+    section_limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(500)
+      .optional()
+      .describe(
+        'Window size for one list section on a sections re-call: return at most this many items of it (1–500). Requires sections naming exactly one list section, e.g. ["variants"] (or ptms, domains, goTerms). Omit together with section_offset to return the whole section.',
+      ),
+    section_offset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Zero-based index of the first item in the windowed section. Defaults to 0. Pass the previous response's nextOffset to page forward. Same requirements as section_limit; set without section_limit, returns every item from this index on.",
       ),
   }),
   output: z.object({
@@ -283,13 +335,17 @@ export const getEntry = tool('uniprot_get_entry', {
         z
           .object({
             accession: z.string().describe('The requested accession that did not resolve.'),
-            error: z.string().describe('Why it failed and how to recover.'),
+            error: z
+              .string()
+              .describe(
+                'Why it failed and how to recover. For an inactive accession: the merge target to retry with, the demerge products to choose among, or the UniParc ID that keeps a deleted sequence.',
+              ),
           })
           .describe('A per-accession failure.'),
       )
       .optional()
       .describe(
-        'Accessions that were well-formed but not found in UniProtKB. Present when kind is "full".',
+        'Accessions that were well-formed but did not resolve to an active entry — unknown to UniProtKB, or inactive (merged, demerged, or deleted). Present when kind is "full".',
       ),
     sections: z
       .array(
@@ -306,45 +362,174 @@ export const getEntry = tool('uniprot_get_entry', {
       .describe(
         'Section outline returned when a single record exceeds the context budget. Present when kind is "outline".',
       ),
+    window: z
+      .object({
+        section: z.string().describe('The section key section_limit/section_offset windowed.'),
+        offset: z.number().describe('Index of the first returned item within the full section.'),
+      })
+      .optional()
+      .describe(
+        "The window applied to succeeded[0]'s one requested section. Present only when section_limit or section_offset was set; totalCount and nextOffset place it in the full section.",
+      ),
   }),
   enrichment: {
     notice: z
       .string()
       .optional()
       .describe(
-        'Re-call guidance when kind is "outline" — re-call the same accession with sections:[...] to pull specific sections.',
+        'Re-call guidance. On kind "outline": re-call the same accession with sections:[...] to pull specific sections. On a section window: the section_offset that pages the rest, or why the window came back empty.',
       ),
+    totalCount: z
+      .number()
+      .optional()
+      .describe(
+        'Items in the windowed section before section_limit/section_offset applied. Present on every windowed call; 0 when the record lacks the section.',
+      ),
+    truncated: z
+      .boolean()
+      .optional()
+      .describe('True when items remain past the returned window. Absent on the final window.'),
+    shown: z.number().optional().describe('Items in the returned window. Present when truncated.'),
+    cap: z.number().optional().describe('The section_limit applied. Present when truncated.'),
+    nextOffset: z
+      .number()
+      .optional()
+      .describe(
+        'section_offset for the next window (same section_limit). Present while items remain.',
+      ),
+    absentSections: z
+      .array(z.string().describe('A requested section key the record does not carry.'))
+      .optional()
+      .describe(
+        'Requested section keys this record does not carry — UniProt holds no annotation of that kind for it, or fields excluded it. Not an error: the other requested sections are returned. Present only on a sections re-call that named one.',
+      ),
+  },
+  enrichmentTrailer: {
+    nextOffset: { label: 'Next section_offset' },
+    absentSections: {
+      render: (keys: string[]) =>
+        `**Absent sections:** ${keys.join(', ')} — this record carries no data for ${keys.length === 1 ? 'that section' : 'those sections'}.`,
+    },
   },
   errors: [
     {
+      reason: 'sections_single_accession',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'sections was passed with more than one accession — rejected before any request. sections re-calls a single outlined record.',
+      recovery:
+        'Trim a batch with fields instead, or re-call one accession at a time with sections.',
+    },
+    {
+      reason: 'unknown_section',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'sections named a key this tool never emits — rejected before any request. The message lists every valid key.',
+      recovery:
+        'Pass section keys from the outline response, or pick from the valid keys the message lists.',
+    },
+    {
+      reason: 'invalid_section_window',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'section_limit or section_offset was set without sections naming exactly one list section — no sections, several, or a non-list section such as organism or xrefs. Rejected before any request.',
+      recovery:
+        'Re-call with sections naming one list section (e.g. ["variants"]), or drop section_limit and section_offset.',
+    },
+    {
       reason: 'all_not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'Every accession in the batch was well-formed but unknown to UniProtKB.',
-      recovery: 'Verify the accessions via uniprot_search_proteins or uniprot_map_ids, then retry.',
+      when: 'No accession in the batch resolved to an active entry — each was unknown to UniProtKB or inactive (merged, demerged, or deleted). The message names each inactive accession and its replacement.',
+      recovery:
+        'Retry with a replacement accession the message names, or verify the accessions via uniprot_search_proteins or uniprot_map_ids.',
+    },
+    {
+      reason: 'invalid_fields',
+      code: JsonRpcErrorCode.InvalidParams,
+      when: 'UniProtKB rejected the fields value — the message relays UniProt naming the rejected field.',
+      recovery:
+        'Correct or remove the field named in the message, or omit fields for the default curated set.',
     },
   ],
 
   async handler(input, ctx) {
-    const service = getUniProtService();
-    const entries = await service.getEntries(input.accessions, input.fields, ctx);
+    // Keys resolve case-insensitively to their canonical spelling; an unknown key stays as sent.
+    const sections = input.sections?.map((s) => SECTION_KEY_BY_LOWERCASE.get(s.toLowerCase()) ?? s);
+    if (sections?.length) {
+      if (input.accessions.length > 1) {
+        throw ctx.fail(
+          'sections_single_accession',
+          `sections re-calls one outlined record, but ${input.accessions.length} accessions were passed. Trim a batch with fields (e.g. "accession,cc_function,cc_disease"), or re-call one accession at a time with sections.`,
+          { accessions: input.accessions.length },
+        );
+      }
+      const unmatched = [...new Set(sections.filter((s) => !SECTION_KEYS.includes(s)))];
+      if (unmatched.length > 0) {
+        throw ctx.fail(
+          'unknown_section',
+          `Unknown section${unmatched.length === 1 ? '' : 's'}: ${unmatched.join(', ')}. Available sections: ${SECTION_KEYS.join(', ')}.`,
+          { unmatched, available: SECTION_KEYS },
+        );
+      }
+    }
 
-    const byAccession = new Map(entries.map((e) => [e.accession, e]));
+    const windowed = input.section_limit !== undefined || input.section_offset !== undefined;
+    if (windowed) {
+      const named = [...new Set(sections ?? [])];
+      const listHint = `List sections: ${LIST_SECTION_KEYS.join(', ')}.`;
+      if (named.length !== 1) {
+        throw ctx.fail(
+          'invalid_section_window',
+          `section_limit and section_offset window exactly one section, but sections ${sections === undefined ? 'was not passed' : `names ${named.length}`}. Re-call with sections naming one list section, e.g. sections:["variants"]. ${listHint}`,
+        );
+      }
+      if (!LIST_SECTION_KEYS.includes(named[0] as string)) {
+        throw ctx.fail(
+          'invalid_section_window',
+          `${named[0]} is not a list section, so section_limit and section_offset cannot window it — drop them to fetch it whole. ${listHint}`,
+        );
+      }
+    }
+
+    const service = getUniProtService();
+    let batch: { entries: Entry[]; inactive: InactiveEntry[] };
+    try {
+      batch = await service.getEntries(input.accessions, input.fields, ctx);
+    } catch (err) {
+      // The service relays UniProt's 400 as InvalidParams carrying UniProt's own message;
+      // the only caller text this request carries is fields (accessions are regex-checked).
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
+        throw ctx.fail('invalid_fields', err.message, undefined, { cause: err });
+      }
+      throw err;
+    }
+
+    const byAccession = new Map(batch.entries.map((e) => [e.accession, e]));
+    const inactiveByAccession = new Map(batch.inactive.map((i) => [i.accession, i]));
     const succeeded: Entry[] = [];
     const failed: { accession: string; error: string }[] = [];
+    const inactiveReasons: string[] = [];
     for (const acc of input.accessions) {
       const entry = byAccession.get(acc);
-      if (entry) succeeded.push(entry);
-      else
+      const inactive = inactiveByAccession.get(acc);
+      if (entry) {
+        succeeded.push(entry);
+      } else if (inactive) {
+        const error = describeInactive(inactive);
+        failed.push({ accession: acc, error });
+        inactiveReasons.push(error);
+      } else {
         failed.push({
           accession: acc,
           error: `Accession ${acc} not found in UniProtKB. Verify via uniprot_search_proteins or uniprot_map_ids.`,
         });
+      }
     }
 
     if (succeeded.length === 0) {
       throw ctx.fail(
         'all_not_found',
-        `None of the ${input.accessions.length} accession(s) resolved in UniProtKB.`,
+        [
+          `None of the ${input.accessions.length} accession(s) resolved in UniProtKB.`,
+          ...inactiveReasons,
+        ].join(' '),
         { accessions: input.accessions },
       );
     }
@@ -352,25 +537,48 @@ export const getEntry = tool('uniprot_get_entry', {
     // Single-record overflow path: outline a fat record so the agent re-calls with sections:[...].
     const entry = failed.length === 0 && succeeded.length === 1 ? succeeded[0] : undefined;
     if (entry) {
-      if (input.sections?.length) {
+      if (sections?.length) {
+        // Keys were checked against SECTION_KEYS above; one missing here is a section this record lacks.
+        const record = entry as unknown as Record<string, unknown>;
+        const absent = [...new Set(sections.filter((s) => !(s in record)))];
         const projected = selectSections(
-          entry as unknown as Record<string, unknown>,
-          input.sections,
-          {
-            alwaysKeep: [
-              'accession',
-              'entryName',
-              'proteinName',
-              'genes',
-              'organism',
-              'length',
-              'reviewed',
-              'annotationScore',
-              'proteinExistence',
-            ],
-          },
+          record,
+          sections.filter((s) => s in record),
+          { alwaysKeep: IDENTITY_KEYS },
         );
-        return { kind: 'full' as const, succeeded: [projected as unknown as Entry], failed };
+        if (absent.length > 0) ctx.enrich({ absentSections: absent });
+        if (!windowed) {
+          return { kind: 'full' as const, succeeded: [projected as unknown as Entry], failed };
+        }
+
+        // Validated above: sections names exactly one list section.
+        const section = sections[0] as string;
+        const offset = input.section_offset ?? 0;
+        const items = (projected[section] as unknown[] | undefined) ?? [];
+        const end =
+          input.section_limit === undefined
+            ? items.length
+            : Math.min(offset + input.section_limit, items.length);
+        if (section in projected) projected[section] = items.slice(offset, end);
+        ctx.enrich.total(items.length);
+        if (input.section_limit !== undefined && end < items.length) {
+          ctx.enrich.truncated({
+            shown: end - offset,
+            cap: input.section_limit,
+            guidance: `${items.length - end} of ${items.length} items in ${section} remain. Re-call with section_offset:${end} (same section_limit) for the next window.`,
+          });
+          ctx.enrich({ nextOffset: end });
+        } else if (items.length > 0 && offset >= items.length) {
+          ctx.enrich.notice(
+            `section_offset ${offset} is past the end of ${section}, which holds ${items.length} item(s) — page with section_offset below ${items.length}.`,
+          );
+        }
+        return {
+          kind: 'full' as const,
+          succeeded: [projected as unknown as Entry],
+          failed,
+          window: { section, offset },
+        };
       }
       const outcome = outlineOnOverflow(entry as unknown as Record<string, unknown>);
       if (outcome.kind === 'outline') {
@@ -400,7 +608,17 @@ export const getEntry = tool('uniprot_get_entry', {
       lines.push('Record too large — re-call with sections:[...] to pull only what you need.');
       for (const s of result.sections) lines.push(`- **${s.name}** — ${s.bytes} bytes`);
     }
+    const windowSection = result.window?.section;
+    /** How many items of a capped list render: the whole windowed section, else the first LIST_CAP. */
+    const capFor = (key: string) => (key === windowSection ? Number.POSITIVE_INFINITY : LIST_CAP);
     for (const e of result.succeeded ?? []) {
+      /** The line naming what a capped list left out and how to page it — nothing when it rendered whole. */
+      const leftOut = (key: string, label: string, total: number) =>
+        total > capFor(key)
+          ? [
+              `- … ${total - LIST_CAP} more ${label} not shown — re-call with accessions:["${e.accession}"], sections:["${key}"], section_offset:${LIST_CAP}, section_limit:100 for items ${LIST_CAP + 1}–${Math.min(total, LIST_CAP + 100)} of ${total}.`,
+            ]
+          : [];
       lines.push(`# ${e.proteinName ?? e.entryName} (${e.accession})`);
       lines.push(`**Entry:** ${e.entryName}`);
       lines.push(
@@ -415,6 +633,15 @@ export const getEntry = tool('uniprot_get_entry', {
         `**Organism:** ${e.organism.scientificName}${e.organism.commonName ? ` (${e.organism.commonName})` : ''}${e.organism.mnemonic ? ` "${e.organism.mnemonic}"` : ''} [taxon ${e.organism.taxonId}]`,
       );
       if (e.genes.length) lines.push(`**Genes:** ${e.genes.join(', ')}`);
+      if (result.window) {
+        const { section, offset } = result.window;
+        const count = (e[section as keyof Entry] as unknown[] | undefined)?.length ?? 0;
+        lines.push(
+          count > 0
+            ? `**Window:** \`${section}\` items ${offset + 1}–${offset + count} (section_offset ${offset})`
+            : `**Window:** \`${section}\` — no items at section_offset ${offset}`,
+        );
+      }
       if (e.function?.length)
         lines.push(
           `**Function:** ${e.function
@@ -444,8 +671,10 @@ export const getEntry = tool('uniprot_get_entry', {
           );
       }
       if (e.variants?.length) {
-        lines.push(`**Variants:** ${e.variants.length} natural variant(s)`);
-        for (const v of e.variants.slice(0, 25)) {
+        lines.push(
+          `**Variants:** ${e.variants.length} natural variant(s)${windowSection === 'variants' ? ' in this window' : ''}`,
+        );
+        for (const v of e.variants.slice(0, capFor('variants'))) {
           const pos =
             v.location.start === v.location.end || v.location.end == null
               ? `${v.location.start ?? '?'}`
@@ -454,10 +683,13 @@ export const getEntry = tool('uniprot_get_entry', {
             `- ${pos}${v.original && v.variation ? ` ${v.original}→${v.variation}` : ''}${v.featureId ? ` [${v.featureId}]` : ''}${v.description ? `: ${v.description}` : ''}`,
           );
         }
+        lines.push(...leftOut('variants', 'variants', e.variants.length));
       }
       if (e.ptms?.length) {
-        lines.push(`**PTMs:** ${e.ptms.length}`);
-        for (const p of e.ptms.slice(0, 25)) {
+        lines.push(
+          `**PTMs:** ${e.ptms.length}${windowSection === 'ptms' ? ' in this window' : ''}`,
+        );
+        for (const p of e.ptms.slice(0, capFor('ptms'))) {
           const range =
             p.location.start != null
               ? ` @${p.location.start}${p.location.end != null && p.location.end !== p.location.start ? `-${p.location.end}` : ''}`
@@ -466,13 +698,15 @@ export const getEntry = tool('uniprot_get_entry', {
             `- ${p.type}${range}${p.featureId ? ` [${p.featureId}]` : ''}${p.description ? `: ${p.description}` : ''}`,
           );
         }
+        lines.push(...leftOut('ptms', 'PTMs', e.ptms.length));
       }
       if (e.domains?.length) {
         lines.push('**Domains/regions:**');
-        for (const d of e.domains.slice(0, 25))
+        for (const d of e.domains.slice(0, capFor('domains')))
           lines.push(
             `- ${d.type}${d.location.start != null ? ` ${d.location.start}-${d.location.end ?? '?'}` : ''}${d.featureId ? ` [${d.featureId}]` : ''}${d.description ? `: ${d.description}` : ''}`,
           );
+        lines.push(...leftOut('domains', 'domains', e.domains.length));
       }
       if (e.isoforms?.length)
         lines.push(
@@ -486,8 +720,11 @@ export const getEntry = tool('uniprot_get_entry', {
         );
       if (e.xrefs && Object.keys(e.xrefs).length) {
         lines.push('**Cross-references:**');
+        // xrefs is a record, not a list section — section_limit cannot page it; the full set rides structuredContent.
         for (const [db, ids] of Object.entries(e.xrefs))
-          lines.push(`- ${db}: ${ids.slice(0, 30).join(', ')}`);
+          lines.push(
+            `- ${db}: ${ids.slice(0, XREF_CAP).join(', ')}${ids.length > XREF_CAP ? ` (+${ids.length - XREF_CAP} more ${db} ids not shown — all ${ids.length} are in structuredContent xrefs.${db})` : ''}`,
+          );
       }
       lines.push('');
     }
