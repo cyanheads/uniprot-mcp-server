@@ -29,7 +29,7 @@
 
 ## Overview
 
-Protein research over UniProtKB (rest.uniprot.org). Search by function or gene, fetch curated records, translate identifiers across sibling databases, and pull reference proteomes, taxonomy, and sequences from any MCP client. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+Protein research over UniProtKB. Search by function or gene, fetch curated records, map identifiers from Ensembl, ChEMBL, RefSeq, PDB, and more, and pull reference proteomes, taxonomy, and sequences.
 
 ### Tools
 
@@ -61,75 +61,56 @@ All resource data is also reachable via tools — tool-only clients lose nothing
 
 ### `uniprot_search_proteins` <sub>tool</sub>
 
-- `text_search` for plain language (the 80% case) **or** `query` for full Lucene field syntax (`gene`, `organism_id`, `keyword`, `go`, `reviewed`, `protein_name`, `family`, `length`, `existence`, `accession`) — exactly one
-- `reviewed` defaults to `true` (Swiss-Prot only) so the agent isn't drowned in TrEMBL predictions; `false` searches both tiers together (put `reviewed:false` in `query` for TrEMBL only)
-- `organism_id` convenience filter ANDed onto the whole query — the caller's clause is parenthesized first, so a top-level `OR` stays filtered on every branch; a clause with unbalanced parentheses is rejected before the request
-- Optional `facets` for server-side count breakdowns (e.g. `reviewed`, `model_organism`)
-- Forward cursor pagination (UniProtKB has no offset paging); `totalResults` and the effective query echoed back. A cursor UniProt can't continue from fails `invalid_cursor`: restart without it
-- Every hit carries `reviewed`, `annotationScore`, and `proteinExistence` so curation quality is weighable
-- An inactive accession the query matches (merged, demerged, or deleted) lands in `inactive[]` with its reason and replacement accessions or UniParc ID — never in `results[]` as a hollow hit
+- `text_search` for plain language **or** `query` for Lucene field syntax (`gene`, `organism_id`, `keyword`, `go`, `reviewed`, `protein_name`, `family`, `length`, `existence`, `accession`) — exactly one. `organism_id` filters the whole query; unbalanced parentheses are rejected. Optional `facets` return count breakdowns (e.g. `reviewed`, `model_organism`)
+- `reviewed` defaults to `true` (Swiss-Prot only); `false` searches both tiers (put `reviewed:false` in `query` for TrEMBL only). Every hit carries `reviewed`, `annotationScore`, and `proteinExistence`
+- Forward-only cursor pagination; returns `totalResults` and the effective query. A cursor UniProt can't continue from fails `invalid_cursor`: restart without it
+- Inactive accessions (merged, demerged, or deleted) go in `inactive[]` with the reason and replacements, not in `results[]`
 
 ---
 
 ### `uniprot_get_entry` <sub>tool</sub>
 
-- Batch up to 20 accessions in one round trip
-- Sectioned record: function, catalytic activity, cofactors, subcellular location, disease, PTMs, natural variants, isoforms, domains, GO terms, keywords, cross-references
-- Partial-success output — resolved entries in `succeeded[]`, unknown or inactive ones in `failed[]`; the whole batch never aborts on one bad accession
-- An inactive accession (merged, demerged, or deleted) is reported in `failed[]`, never as a record — its error names the merge target to retry with, the demerge products, or the UniParc ID that keeps a deleted sequence
-- `fields` trims the upstream projection; identity and provenance fields are always retained
-- A single oversized record returns `kind: "outline"` (a section listing) instead of overflowing context — re-call the same accession with `sections: [...]` to pull only what's needed (one accession per `sections` call; trim a batch with `fields`)
-- A list section too large on its own (p53's natural variants, over a thousand) pages with `section_limit` (1–500) and `section_offset` on a re-call naming that one section; each window reports `totalCount` and, while items remain, `nextOffset`
-- Accessions come from `uniprot_search_proteins` or `uniprot_map_ids`; strip any `-N` isoform suffix first
+- Up to 20 accessions per call, from `uniprot_search_proteins` or `uniprot_map_ids` (strip any `-N` isoform suffix). Sectioned record: function, catalytic activity, cofactors, subcellular location, disease, PTMs, natural variants, isoforms, domains, GO terms, keywords, cross-references. `fields` trims the output; identity and provenance fields are always kept
+- Resolved entries come back in `succeeded[]`, unknown or inactive ones in `failed[]`, so one bad accession doesn't abort the batch. An inactive accession's error names the merge target, the demerge products, or the UniParc ID
+- An oversized record returns `kind: "outline"` (a section listing); re-call one accession with `sections: [...]` for the parts you need. A very large list section pages with `section_limit` (1–500) and `section_offset`, reporting `totalCount` and `nextOffset`
 
 ---
 
 ### `uniprot_map_ids` <sub>tool</sub>
 
-- `from_db` / `to_db` are validated enums (e.g. `Gene_Name`, `Ensembl`, `RefSeq_Protein`, `ChEMBL`, `PDB`, `GeneID`, and `UniProtKB_AC-ID` as a source) so an unknown database fails before the upstream call
-- Target `UniProtKB-Swiss-Prot` for reviewed accessions only (the usual intent), or `UniProtKB` to include unreviewed TrEMBL
-- The job runs asynchronously; the tool submits it and polls within a budget. A running job returns `status: "running"` with a ticket — pass that ticket alone to poll the same job
-- A completed call returns `status: "finished"` with one upstream page. If `continuation` is present, pass it alone to fetch the next completed page without polling or re-submitting; its absence marks the terminal page
-- Pair a gene-symbol `from_db` with `tax_id` to disambiguate species
-- `unmappedIds` is populated only from UniProt's `failedIds`, so identifiers UniProt normalizes in successful result rows are not misclassified as failures
-- A row whose UniProtKB target is inactive (merged, demerged, or deleted) stays a mapping but carries an `inactive` marker with the reason and replacements; active targets carry none
+- `from_db` / `to_db` are validated enums (e.g. `Gene_Name`, `Ensembl`, `RefSeq_Protein`, `ChEMBL`, `PDB`, `GeneID`, and `UniProtKB_AC-ID` as a source); an unknown database fails before any request. Target `UniProtKB-Swiss-Prot` for reviewed accessions only, or `UniProtKB` to include TrEMBL. Pair a gene-symbol `from_db` with `tax_id` to pick the species
+- Submits the job and polls within a time budget. A job still running returns `status: "running"` with a ticket; pass that ticket alone to poll it. A finished call returns `status: "finished"` with one page, and `continuation` (pass it alone) fetches the next; no `continuation` means the last page
+- `unmappedIds` lists only identifiers UniProt reports as failed. A row whose UniProtKB target is inactive (merged, demerged, or deleted) carries an `inactive` marker with the reason and replacements
 
 ---
 
 ### `uniprot_get_proteome` <sub>tool</sub>
 
-- Provide exactly one of `upid` (e.g. `UP000005640`) or `taxon_id` — providing both or neither fails validation
-- Metadata inline: proteome type, total protein count, BUSCO completeness (score, complete/fragmented/missing counts, lineage dataset), genome assembly accession
-- The protein set is opt-in via `include_proteins` (it is large — human is ~147,506) and returns a capped page with a forward cursor and truncation disclosure; a cursor UniProt can't continue from fails `invalid_cursor`
-- Narrow the protein list with the `query` filter (UniProtKB Lucene syntax) for a subset
-- Resolve an organism name to a taxon ID first with `uniprot_get_taxonomy`
+- Provide exactly one of `upid` (e.g. `UP000005640`) or `taxon_id`; both or neither fails validation. Resolve an organism name to a taxon ID first with `uniprot_get_taxonomy`
+- Returns proteome type, total protein count, BUSCO completeness (score, complete/fragmented/missing counts, lineage dataset), and genome assembly accession
+- Proteins are opt-in via `include_proteins` (human has ~147,506) and come back as a capped page with a forward cursor; narrow with `query` (UniProtKB Lucene syntax). A cursor UniProt can't continue from fails `invalid_cursor`
 
 ---
 
 ### `uniprot_get_taxonomy` <sub>tool</sub>
 
-- Provide exactly one of `taxon_id` (NCBI numeric ID) or `name` (scientific name) — both or neither fails validation
+- Provide exactly one of `taxon_id` (NCBI numeric ID) or `name` (scientific name); both or neither fails validation. Gives the taxon ID that `uniprot_search_proteins` (`organism_id`) and `uniprot_get_proteome` (`taxon_id`) expect
 - Returns scientific and common name, mnemonic, rank, parent, and the full lineage (root → near ancestor)
-- `include_children` fetches the immediate child taxa via a follow-up search (not inline on the record), 100 per page with the total child count; when more remain, the response carries truncation disclosure and a `cursor` for the next page. The cursor names its taxon, so one sent with another taxon fails `invalid_cursor` before the children are fetched
-- Turns an organism name into the taxon ID that `uniprot_search_proteins` (`organism_id`) and `uniprot_get_proteome` (`taxon_id`) expect
+- `include_children` adds the immediate child taxa, 100 per page with the total count and a `cursor` for the next page. A cursor sent with a different taxon fails `invalid_cursor`
 
 ---
 
 ### `uniprot_get_sequence` <sub>tool</sub>
 
-- Returns the canonical sequence with its length and parsed FASTA header
-- `include_isoforms` also returns the alternatively-spliced isoform sequences
-- A merged accession returns its merge target's sequences, labelled with the target accession and the requested one in `mergedFrom`; a demerged or deleted accession fails `not_found` naming its replacements or UniParc ID
-- Accessions come from `uniprot_search_proteins` or `uniprot_map_ids`; strip any `-N` isoform suffix first
+- Returns the canonical sequence with its length and parsed FASTA header; `include_isoforms` adds the isoform sequences. Accessions come from `uniprot_search_proteins` or `uniprot_map_ids` (strip any `-N` isoform suffix)
+- A merged accession returns its merge target's sequences, with the requested accession in `mergedFrom`; a demerged or deleted one fails `not_found` naming its replacements or UniParc ID
 
 ---
 
 ### `uniprot://entry/{accession}` <sub>resource</sub>
 
-- Same record as `uniprot_get_entry` for a single accession, addressed by URI instead of a tool call
-- An inactive accession (merged, demerged, or deleted) fails `not_found` with the same message `uniprot_get_entry` puts in `failed[]`
-- An annotation-heavy entry over the outline budget returns a bounded identity summary plus a section outline instead of the full record — fetch specific sections via the `uniprot_get_entry` tool (`sections: [...]`); the resource URI itself takes no sections parameter
-- The overflow summary always keeps identity fields — accession, entry name, protein name, genes, organism, length, reviewed status, annotation score, protein existence
+- Same record as `uniprot_get_entry` for a single accession, addressed by URI. An inactive accession (merged, demerged, or deleted) fails `not_found`
+- A very large entry returns an identity summary (accession, entry name, protein name, genes, organism, length, reviewed status, annotation score, protein existence) plus a section outline; fetch specific sections with `uniprot_get_entry` (`sections: [...]`), since the URI takes no sections parameter
 
 ---
 
@@ -154,15 +135,14 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 UniProt-specific:
 
 - Keyless — UniProt REST requires no API key; works against any `rest.uniprot.org`-compatible base (override `UNIPROT_BASE_URL` for a private mirror)
-- One thin `fetch` client over all four REST collections (UniProtKB, ID Mapping, Proteomes, Taxonomy) with retry/backoff and HTML-error-page detection
-- Batch entry fetch — N accessions in one round trip, cross-referenced against the request to flag any missing
-- Async ID-mapping run → poll bounded by a wall-clock budget, with a running-job ticket and separately paginated completed results
+- Batch entry fetch — N accessions in one round trip, with any missing ones flagged
+- Async ID mapping with a bounded poll, a resumable ticket for running jobs, and paginated results
 
 Agent-friendly output:
 
 - Provenance is data, not decoration — `reviewed`, `annotationScore`, `proteinExistence`, and per-field PubMed/ECO evidence ship on every record so the agent can weigh manual vs. predicted annotation
 - Graceful partial failure — `uniprot_get_entry` returns per-accession `succeeded[]` / `failed[]` rows instead of aborting the batch
-- Discriminated output contracts — `uniprot_get_entry` returns `kind: "full" | "outline"`, while `uniprot_map_ids` separates a running-job `ticket` from a finished-page `continuation`; callers branch on data, not string parsing
+- Explicit output shapes — `uniprot_get_entry` returns `kind: "full" | "outline"`, and `uniprot_map_ids` returns either a `ticket` or a `continuation`
 - Sparsity preserved — absent upstream fields stay absent, never fabricated (most curated sections are legitimately missing on TrEMBL entries)
 
 ## Getting started
@@ -274,12 +254,12 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 |:---|:---|:---|
 | `UNIPROT_BASE_URL` | UniProt REST base URL. Override for a private mirror or testing. | `https://rest.uniprot.org` |
 | `UNIPROT_TIMEOUT_MS` | Per-request HTTP timeout in ms. | `30000` |
-| `UNIPROT_ID_MAPPING_BUDGET_MS` | Wall-clock budget for the inline ID-mapping poll loop before returning a resumable ticket. Must be less than `UNIPROT_TIMEOUT_MS`. | `8000` |
+| `UNIPROT_ID_MAPPING_BUDGET_MS` | Time budget for the ID-mapping poll before returning a ticket. Must be less than `UNIPROT_TIMEOUT_MS`. | `8000` |
 | `UNIPROT_DEFAULT_PAGE_SIZE` | Default page size for search and proteome protein listing when the caller leaves it unset. | `25` |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for HTTP server. | `3010` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
-| `MCP_SESSION_MODE` | HTTP session posture: `auto`, `stateful`, or `stateless`. The server declares `stateless` in code — no tool holds per-session state — so set this only to opt back into a session store. | `stateless` |
+| `MCP_SESSION_MODE` | HTTP session mode: `auto`, `stateful`, or `stateless`. The server is stateless by default. | `stateless` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
 | `LOGS_DIR` | Directory for log files (Node.js only). | `<project-root>/logs` |
 | `LOG_TOOL_FAILURE_PAYLOADS` | Log each failed tool call's arguments and result, redacted by key name and capped at `LOG_TOOL_FAILURE_PAYLOAD_MAX_BYTES` (default `16384`). A secret inside a free-form value is not redacted. | `false` |
