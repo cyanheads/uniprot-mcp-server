@@ -6,7 +6,7 @@
  *   ctx.fail contract, the partial-success succeeded[]/failed[] split, input
  *   validation at the schema edge, and the outline-on-overflow / sections re-call
  *   paths — the single-accession and absent-section rules, bounded section
- *   windows walked page by page, the format() cap disclosures, and unbounded
+ *   windows walked page by page, complete rendering past the former caps, and unbounded
  *   output pinned on both surfaces (exact structuredContent, inline-snapshot text).
  * @module tests/tools/uniprot-get-entry.tool.test
  */
@@ -16,6 +16,7 @@ import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mc
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/services/uniprot/types.js';
 import { ACCESSION_MESSAGE } from '@/services/uniprot/types.js';
+import p00918 from '../fixtures/p00918-xrefs.json' with { type: 'json' };
 import {
   activeRawEntry,
   contentText,
@@ -95,6 +96,136 @@ afterEach(() => {
 });
 
 describe('getEntry handler', () => {
+  it('returns every captured P00918 xref in database order on an explicit section call', async () => {
+    getEntriesMock.mockResolvedValue(batch(p00918));
+    const result = await runToolContract(getEntry, { accessions: ['P00918'], sections: ['xrefs'] });
+    expect(result.isError).toBeFalsy();
+    expect(result.structuredContent).toMatchObject({ succeeded: [{ xrefs: p00918.xrefs }] });
+    const lines = contentText(result).split('\n');
+    for (const [database, identifiers] of Object.entries(p00918.xrefs)) {
+      const line = lines.find((value) => value.startsWith(`- \`${database}\`: `));
+      expect(
+        line
+          ?.split(': ')[1]
+          ?.split(', ')
+          .map((value) => value.slice(1, -1)),
+      ).toEqual(identifiers);
+    }
+  });
+  it('keeps the complete 24,000-byte result inline and outlines the next two UTF-8 bytes', async () => {
+    const base = { ...brca1, function: [{ value: 'seed' }], xrefs: {} };
+    const empty = { kind: 'full' as const, succeeded: [base], failed: [] };
+    const overhead = Buffer.byteLength(
+      JSON.stringify({ structuredContent: empty, content: getEntry.format!(empty) }),
+      'utf8',
+    );
+    const remaining = 24_000 - overhead;
+    expect(remaining % 2).toBe(0);
+    const entry = { ...base, function: [{ value: `seed${'x'.repeat(remaining / 2)}` }] };
+    getEntriesMock.mockResolvedValue(batch(entry));
+    const at = await runToolContract(getEntry, { accessions: ['P38398'] });
+    expect(Buffer.byteLength(JSON.stringify(at), 'utf8')).toBe(24_000);
+    expect(at.structuredContent).toMatchObject({ kind: 'full', succeeded: [entry] });
+    getEntriesMock.mockResolvedValue(
+      batch({ ...entry, function: [{ value: `${entry.function[0]?.value}x` }] }),
+    );
+    const over = await runToolContract(getEntry, { accessions: ['P38398'] });
+    expect(over.structuredContent).toMatchObject({ kind: 'outline' });
+    expect(over.structuredContent).not.toHaveProperty('succeeded');
+    // Multibyte annotations consume bytes, not UTF-16 code units.
+    getEntriesMock.mockResolvedValue(
+      batch({ ...base, function: [{ value: 'é'.repeat(remaining / 2) }] }),
+    );
+    expect(
+      (await runToolContract(getEntry, { accessions: ['P38398'] })).structuredContent,
+    ).toMatchObject({ kind: 'outline' });
+  });
+  it('outlines aggregate successes in request order and preserves failures and duplicate requests', async () => {
+    const first = { ...fullEntry, function: [{ value: 'é'.repeat(4000) }] };
+    const second = { ...brca1, function: [{ value: 'é'.repeat(4000) }] };
+    getEntriesMock.mockResolvedValue(batch(first, second));
+    for (const accession of ['P04637', 'P38398']) {
+      const singleton = await runToolContract(getEntry, { accessions: [accession] });
+      expect(singleton.structuredContent).toMatchObject({ kind: 'full' });
+      expect(Buffer.byteLength(JSON.stringify(singleton), 'utf8')).toBeLessThan(24_000);
+    }
+    const result = await runToolContract(getEntry, {
+      accessions: ['P38398', 'Q00000', 'P04637', 'P38398'],
+    });
+    expect(result.structuredContent).toMatchObject({
+      kind: 'outline',
+      outlinedEntries: [{ accession: 'P38398' }, { accession: 'P04637' }, { accession: 'P38398' }],
+      failed: [{ accession: 'Q00000' }],
+    });
+    expect(result.structuredContent).not.toHaveProperty('succeeded');
+    const text = contentText(result);
+    expect(text).toContain('accessions:["P38398"]');
+    expect(text).toContain('accessions:["P04637"]');
+    expect(text).toContain('Q00000');
+  });
+
+  it.each([
+    ['P04637', 'P38398'],
+    ['P04637', 'Q00000'],
+  ])(
+    'outlines oversized records on heavy-pair and partial-success calls: %j',
+    async (...accessions) => {
+      getEntriesMock.mockResolvedValue(
+        batch(
+          { ...fullEntry, function: [{ value: 'heavy'.repeat(6000) }] },
+          { ...brca1, function: [{ value: 'heavy'.repeat(6000) }] },
+        ),
+      );
+      const result = await runToolContract(getEntry, { accessions });
+      expect(result.isError).toBeFalsy();
+      const out = result.structuredContent as {
+        kind: string;
+        outlinedEntries: { accession: string; bytes: number }[];
+        failed: { accession: string; error: string }[];
+      };
+      expect(out.kind).toBe('outline');
+      expect(out.outlinedEntries.map((entry) => entry.accession)).toEqual(
+        accessions.includes('P38398') ? ['P04637', 'P38398'] : ['P04637'],
+      );
+      expect(out.failed.map((entry) => entry.accession)).toEqual(
+        accessions.includes('Q00000') ? ['Q00000'] : [],
+      );
+      const text = contentText(result);
+      for (const entry of out.outlinedEntries)
+        expect(text).toContain(
+          `**${entry.accession}** — ${entry.bytes} bytes; re-call with accessions:["${entry.accession}"].`,
+        );
+      for (const entry of out.failed) expect(text).toContain(entry.error);
+    },
+  );
+
+  it('renders complete sparse variants and xrefs on a combined explicit section re-call', async () => {
+    const entry = {
+      ...fullEntry,
+      variants: Array.from({ length: 40 }, (_, i) => ({
+        location: { start: i + 1 },
+        description: `Variant ${i}`,
+      })),
+      xrefs: { PDB: Array.from({ length: 40 }, (_, i) => `PDB-${i}`), Other: ['last-id'] },
+    };
+    getEntriesMock.mockResolvedValue(batch(entry));
+    const result = await runToolContract(getEntry, {
+      accessions: ['P04637'],
+      sections: ['variants', 'xrefs'],
+    });
+    expect(result.structuredContent).toMatchObject({
+      succeeded: [{ variants: entry.variants, xrefs: entry.xrefs }],
+    });
+    const lines = contentText(result).split('\n');
+    expect(lines.filter((line) => /^- \d+: Variant /.test(line))).toEqual(
+      Array.from({ length: 40 }, (_, i) => `- ${i + 1}: Variant ${i}`),
+    );
+    expect(lines).toContain(
+      `- \`PDB\`: ${Array.from({ length: 40 }, (_, i) => `\`PDB-${i}\``).join(', ')}`,
+    );
+    expect(lines).toContain('- `Other`: `last-id`');
+    expect(contentText(result)).not.toContain('not shown');
+  });
   it('rejects a malformed accession at the schema edge', () => {
     expect(() => getEntry.input.parse({ accessions: ['nope'] })).toThrow();
     expect(getEntriesMock).not.toHaveBeenCalled();
@@ -489,8 +620,8 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       **Variants:** 1 natural variant(s)
       - 175 R→H [VAR_044588]
       **Cross-references:**
-      - PDB: 1TUP, 2OCJ
-      - ChEMBL: CHEMBL4096
+      - \`PDB\`: \`1TUP\`, \`2OCJ\`
+      - \`ChEMBL\`: \`CHEMBL4096\`
 
       # Breast cancer type 1 susceptibility protein (P38398)
       **Entry:** BRCA1_HUMAN
@@ -526,8 +657,8 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       **Variants:** 1 natural variant(s)
       - 175 R→H [VAR_044588]
       **Cross-references:**
-      - PDB: 1TUP, 2OCJ
-      - ChEMBL: CHEMBL4096
+      - \`PDB\`: \`1TUP\`, \`2OCJ\`
+      - \`ChEMBL\`: \`CHEMBL4096\`
 
       ### Not found
       - **Q00000** — Accession Q00000 not found in UniProtKB. Verify via uniprot_search_proteins or uniprot_map_ids."
@@ -556,12 +687,10 @@ describe('getEntry unbounded output (through runToolContract)', () => {
     `);
   });
 
-  it('returns a record past the format() caps whole on structuredContent, rendering 25 of each capped list and how to page the rest', async () => {
+  it('returns every item on both surfaces past the former renderer caps', async () => {
     const { structured, text } = await call([heavyEntry], { accessions: ['P04637'] });
     expect(structured).toStrictEqual({ kind: 'full', succeeded: [heavyEntry], failed: [] });
-    expect(text).toContain(
-      '- … 5 more variants not shown — re-call with accessions:["P04637"], sections:["variants"], section_offset:25, section_limit:100 for items 26–30 of 30.',
-    );
+    expect(text).not.toContain('not shown');
     expect(text).toMatchInlineSnapshot(`
       "**Result kind:** full
       # Cellular tumor antigen p53 (P04637)
@@ -598,7 +727,11 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       - 23 R→H [VAR_000022]: variant 22
       - 24 R→H [VAR_000023]: variant 23
       - 25 R→H [VAR_000024]: variant 24
-      - … 5 more variants not shown — re-call with accessions:["P04637"], sections:["variants"], section_offset:25, section_limit:100 for items 26–30 of 30.
+      - 26 R→H [VAR_000025]: variant 25
+      - 27 R→H [VAR_000026]: variant 26
+      - 28 R→H [VAR_000027]: variant 27
+      - 29 R→H [VAR_000028]: variant 28
+      - 30 R→H [VAR_000029]: variant 29
       **PTMs:** 28
       - Modified residue @1 [PRO_0000000]: Phosphoserine 0
       - Modified residue @2 [PRO_0000001]: Phosphoserine 1
@@ -625,7 +758,9 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       - Modified residue @23 [PRO_0000022]: Phosphoserine 22
       - Modified residue @24 [PRO_0000023]: Phosphoserine 23
       - Modified residue @25 [PRO_0000024]: Phosphoserine 24
-      - … 3 more PTMs not shown — re-call with accessions:["P04637"], sections:["ptms"], section_offset:25, section_limit:100 for items 26–28 of 28.
+      - Modified residue @26 [PRO_0000025]: Phosphoserine 25
+      - Modified residue @27 [PRO_0000026]: Phosphoserine 26
+      - Modified residue @28 [PRO_0000027]: Phosphoserine 27
       **Domains/regions:**
       - Region 1-9: Region 0
       - Region 11-19: Region 1
@@ -652,10 +787,11 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       - Region 221-229: Region 22
       - Region 231-239: Region 23
       - Region 241-249: Region 24
-      - … 2 more domains not shown — re-call with accessions:["P04637"], sections:["domains"], section_offset:25, section_limit:100 for items 26–27 of 27.
+      - Region 251-259: Region 25
+      - Region 261-269: Region 26
       **Cross-references:**
-      - PDB: 1ABC, 2ABC, 3ABC, 4ABC, 5ABC, 6ABC, 7ABC, 8ABC, 9ABC, 10ABC, 11ABC, 12ABC, 13ABC, 14ABC, 15ABC, 16ABC, 17ABC, 18ABC, 19ABC, 20ABC, 21ABC, 22ABC, 23ABC, 24ABC, 25ABC, 26ABC, 27ABC, 28ABC, 29ABC, 30ABC (+5 more PDB ids not shown — all 35 are in structuredContent xrefs.PDB)
-      - ChEMBL: CHEMBL4096"
+      - \`PDB\`: \`1ABC\`, \`2ABC\`, \`3ABC\`, \`4ABC\`, \`5ABC\`, \`6ABC\`, \`7ABC\`, \`8ABC\`, \`9ABC\`, \`10ABC\`, \`11ABC\`, \`12ABC\`, \`13ABC\`, \`14ABC\`, \`15ABC\`, \`16ABC\`, \`17ABC\`, \`18ABC\`, \`19ABC\`, \`20ABC\`, \`21ABC\`, \`22ABC\`, \`23ABC\`, \`24ABC\`, \`25ABC\`, \`26ABC\`, \`27ABC\`, \`28ABC\`, \`29ABC\`, \`30ABC\`, \`31ABC\`, \`32ABC\`, \`33ABC\`, \`34ABC\`, \`35ABC\`
+      - \`ChEMBL\`: \`CHEMBL4096\`"
     `);
   });
 
@@ -702,7 +838,11 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       - 23 R→H [VAR_000022]: variant 22
       - 24 R→H [VAR_000023]: variant 23
       - 25 R→H [VAR_000024]: variant 24
-      - … 5 more variants not shown — re-call with accessions:["P04637"], sections:["variants"], section_offset:25, section_limit:100 for items 26–30 of 30."
+      - 26 R→H [VAR_000025]: variant 25
+      - 27 R→H [VAR_000026]: variant 26
+      - 28 R→H [VAR_000027]: variant 27
+      - 29 R→H [VAR_000028]: variant 28
+      - 30 R→H [VAR_000029]: variant 29"
     `);
   });
 
@@ -724,8 +864,8 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       **Organism:** Homo sapiens (Human) "HUMAN" [taxon 9606]
       **Genes:** TP53
       **Cross-references:**
-      - PDB: 1ABC, 2ABC, 3ABC, 4ABC, 5ABC, 6ABC, 7ABC, 8ABC, 9ABC, 10ABC, 11ABC, 12ABC, 13ABC, 14ABC, 15ABC, 16ABC, 17ABC, 18ABC, 19ABC, 20ABC, 21ABC, 22ABC, 23ABC, 24ABC, 25ABC, 26ABC, 27ABC, 28ABC, 29ABC, 30ABC (+5 more PDB ids not shown — all 35 are in structuredContent xrefs.PDB)
-      - ChEMBL: CHEMBL4096"
+      - \`PDB\`: \`1ABC\`, \`2ABC\`, \`3ABC\`, \`4ABC\`, \`5ABC\`, \`6ABC\`, \`7ABC\`, \`8ABC\`, \`9ABC\`, \`10ABC\`, \`11ABC\`, \`12ABC\`, \`13ABC\`, \`14ABC\`, \`15ABC\`, \`16ABC\`, \`17ABC\`, \`18ABC\`, \`19ABC\`, \`20ABC\`, \`21ABC\`, \`22ABC\`, \`23ABC\`, \`24ABC\`, \`25ABC\`, \`26ABC\`, \`27ABC\`, \`28ABC\`, \`29ABC\`, \`30ABC\`, \`31ABC\`, \`32ABC\`, \`33ABC\`, \`34ABC\`, \`35ABC\`
+      - \`ChEMBL\`: \`CHEMBL4096\`"
     `);
   });
 });
@@ -888,17 +1028,8 @@ describe('getEntry bounded section windows (through runToolContract)', () => {
     expect(text).not.toContain('below 0');
   });
 
-  it("the unbounded cap line's section_offset/section_limit, re-sent as written, return the rest", async () => {
-    const { text } = await call({ sections: ['ptms'] }, heavyEntry);
-    const line = text.split('\n').find((l) => l.includes('more PTMs not shown')) ?? '';
-    const offset = Number(line.match(/section_offset:(\d+)/)?.[1]);
-    const limit = Number(line.match(/section_limit:(\d+)/)?.[1]);
-    expect(line).toContain('section_offset:25, section_limit:100 for items 26–28 of 28');
-
-    const { out } = await call(
-      { sections: ['ptms'], section_offset: offset, section_limit: limit },
-      heavyEntry,
-    );
+  it('an explicit tail-only window returns the remaining items', async () => {
+    const { out } = await call({ sections: ['ptms'], section_offset: 25 }, heavyEntry);
     const ptms = out.succeeded[0]?.ptms as { featureId?: string }[];
     expect(ptms.map((p) => p.featureId)).toEqual(
       (heavyEntry.ptms ?? []).slice(25).map((p) => p.featureId),
@@ -1007,7 +1138,7 @@ describe('getEntry bounded section windows (through runToolContract)', () => {
   });
 });
 
-describe('getEntry format() list caps', () => {
+describe('getEntry format() complete lists', () => {
   it('renders every item of the windowed section whatever its length', () => {
     const blocks = getEntry.format!({
       kind: 'full',
@@ -1018,8 +1149,9 @@ describe('getEntry format() list caps', () => {
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n');
     for (const p of heavyEntry.ptms ?? []) expect(text).toContain(`[${p.featureId}]`);
     expect(text).not.toContain('more PTMs not shown');
-    // An unwindowed list in the same render keeps its cap and disclosure.
-    expect(text).toContain('more variants not shown');
+    for (const variant of heavyEntry.variants ?? [])
+      expect(text).toContain(`[${variant.featureId}]`);
+    expect(text).not.toContain('not shown');
   });
 });
 
@@ -1193,10 +1325,10 @@ describe('getEntry full curated records (real service, through runToolContract)'
         '**GO:** GO:0005829 [C] cytosol; GO:0005506 [F] iron ion binding',
         '**Keywords:** 3D-structure (KW-0002) — Technical term, Allosteric enzyme (KW-0021) — Molecular function',
         '**Cross-references:**',
-        '- PDB: 1DMW, 1J8T',
-        '- RefSeq: NP_000268.1',
-        '- ChEMBL: CHEMBL3076',
-        '- Ensembl: ENST00000553106.6',
+        '- `PDB`: `1DMW`, `1J8T`',
+        '- `RefSeq`: `NP_000268.1`',
+        '- `ChEMBL`: `CHEMBL3076`',
+        '- `Ensembl`: `ENST00000553106.6`',
       ]),
     );
     // P04637 — synonyms, locations, isoforms, a region, and only the disease that carries a block.

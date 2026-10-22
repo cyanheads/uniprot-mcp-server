@@ -1,9 +1,9 @@
 /**
  * @fileoverview uniprot_get_entry — fetch full curated UniProtKB entries by
  *   accession in batch (≤ 20). Returns partial-success output (succeeded[] +
- *   failed[]) so the agent knows which accessions resolved. When a single
- *   record exceeds the context budget, the response switches to a section
- *   outline (kind: 'outline'); the agent re-calls that one accession with
+ *   failed[]) so the agent knows which accessions resolved. When the complete
+ *   inline result exceeds 24,000 UTF-8 bytes, return an accession outline for a
+ *   batch or section outline for a single record; the agent re-calls one accession with
  *   sections:[...] to pull only the sections it needs, paging a list section
  *   still too large on its own with section_limit/section_offset. Entries do not search — accessions come from
  *   uniprot_search_proteins or uniprot_map_ids.
@@ -12,7 +12,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import { outlineOnOverflow, selectSections } from '@cyanheads/mcp-ts-core/utils';
+import { markdown, selectSections } from '@cyanheads/mcp-ts-core/utils';
 import type { Entry, InactiveEntry } from '@/services/uniprot/types.js';
 import { ACCESSION_MESSAGE, ACCESSION_REGEX, describeInactive } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
@@ -248,10 +248,8 @@ const LIST_SECTION_KEYS = Object.entries(EntrySchema.shape)
   )
   .map(([key]) => key);
 
-/** Items format() renders per capped list on an unbounded call; a windowed section renders whole. */
-const LIST_CAP = 25;
-/** Ids format() renders per cross-reference database. */
-const XREF_CAP = 30;
+/** Maximum UTF-8 bytes of the complete inline result, including both client surfaces. */
+const INLINE_BUDGET_BYTES = 24_000;
 
 /** Identity keys a `sections` projection always keeps, so the slice still names its protein. */
 const IDENTITY_KEYS = [
@@ -269,7 +267,7 @@ const IDENTITY_KEYS = [
 export const getEntry = tool('uniprot_get_entry', {
   title: 'uniprot-mcp-server: get entry',
   description:
-    'Fetch full curated UniProtKB entries by accession in one batch (up to 20). Each entry carries function, catalytic activity, cofactors, subcellular location, disease involvement, PTMs, natural variants, isoforms, domains, GO terms, keywords, and cross-references. Partial failures do not abort the batch — resolved entries land in succeeded[] and unknown or inactive (merged, demerged, deleted) accessions in failed[], where the error for an inactive accession names the accession to retry with or the UniParc ID that keeps its sequence. Pass fields to trim the upstream projection. A single oversized record returns kind: "outline" (a section listing with byte sizes) instead of overflowing context — re-call the same accession with sections:[...] (e.g. ["disease","variants"]) to pull only those. sections takes exactly one accession; trim a batch with fields instead. A list section too large on its own (the natural variants of p53, over a thousand) pages with section_limit/section_offset on a re-call naming that one section. This tool does not search: accessions come from uniprot_search_proteins.results[].accession or uniprot_map_ids. Strip any isoform suffix (P04637-2 to P04637) before calling.',
+    'Fetch full curated UniProtKB entries by accession in one batch (up to 20). Each entry carries function, catalytic activity, cofactors, subcellular location, disease involvement, PTMs, natural variants, isoforms, domains, GO terms, keywords, and cross-references. Partial failures do not abort the batch — resolved entries land in succeeded[] and unknown or inactive (merged, demerged, deleted) accessions in failed[], where an inactive accession names its replacement or UniParc ID. Pass fields to trim the upstream projection. Initial responses exceeding 24,000 UTF-8 bytes across both output surfaces return kind: "outline": a single resolved record lists sections with byte sizes; a batch lists outlinedEntries in request order and retains failed[]. Re-call each outlined accession individually, e.g. accessions:["P04637"], for its full record or section outline, then add sections:["disease","variants"] to select sections. sections takes exactly one accession; trim a batch with fields instead. All returned list items and cross-reference IDs render in full. A large list section pages with section_limit/section_offset on a re-call naming that one section. This tool does not search: accessions come from uniprot_search_proteins.results[].accession or uniprot_map_ids. Strip any isoform suffix (P04637-2 to P04637) before calling.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     accessions: z
@@ -324,7 +322,7 @@ export const getEntry = tool('uniprot_get_entry', {
     kind: z
       .enum(['full', 'outline'])
       .describe(
-        'Result kind. "full": the batch resolved — read succeeded[] and failed[]. "outline": a single record exceeded the context budget and is returned as a section listing — re-call the same accession with sections:[...] to pull specific sections.',
+        'Result kind. "full": read succeeded[] and failed[]. "outline": the complete inline result exceeded 24,000 UTF-8 bytes; read outlinedEntries for a batch or sections for a single record, and re-call one accession individually.',
       ),
     succeeded: z
       .array(EntrySchema)
@@ -345,7 +343,7 @@ export const getEntry = tool('uniprot_get_entry', {
       )
       .optional()
       .describe(
-        'Accessions that were well-formed but did not resolve to an active entry — unknown to UniProtKB, or inactive (merged, demerged, or deleted). Present when kind is "full".',
+        'Accessions that did not resolve to an active entry — unknown to UniProtKB, or inactive (merged, demerged, or deleted). Retained on batch outlines as well as full results.',
       ),
     sections: z
       .array(
@@ -360,7 +358,22 @@ export const getEntry = tool('uniprot_get_entry', {
       )
       .optional()
       .describe(
-        'Section outline returned when a single record exceeds the context budget. Present when kind is "outline".',
+        'Section outline for a single fully resolved accession whose inline result exceeds the budget. Absent on batch outlines, which return outlinedEntries instead.',
+      ),
+    outlinedEntries: z
+      .array(
+        z
+          .object({
+            accession: z
+              .string()
+              .describe('Accession to re-call individually with accessions:[accession].'),
+            bytes: z.number().describe('UTF-8 serialized bytes of this entry before outlining.'),
+          })
+          .describe('An omitted successful entry and its size.'),
+      )
+      .optional()
+      .describe(
+        'Successful entries omitted when the aggregate inline result exceeds 24,000 UTF-8 bytes, in request order. Re-call each accession individually for its full record or section outline.',
       ),
     window: z
       .object({
@@ -580,15 +593,39 @@ export const getEntry = tool('uniprot_get_entry', {
           window: { section, offset },
         };
       }
-      const outcome = outlineOnOverflow(entry as unknown as Record<string, unknown>);
-      if (outcome.kind === 'outline') {
-        ctx.log.info('Entry exceeded budget — returning outline', {
-          accession: entry.accession,
-          sections: outcome.sections.length,
-        });
-        if (outcome.notice) ctx.enrich.notice(outcome.notice);
-        return { kind: 'outline' as const, sections: outcome.sections };
+    }
+
+    const inline = { kind: 'full' as const, succeeded, failed };
+    /** Initial full calls attach no enrichment. Measure both surfaces after the schema parse the framework applies. */
+    const parsed = { ...inline, succeeded: succeeded.map((value) => EntrySchema.parse(value)) };
+    const sizeBytes = Buffer.byteLength(
+      JSON.stringify({ structuredContent: parsed, content: formatEntryResult(parsed) }),
+      'utf8',
+    );
+    if (sizeBytes > INLINE_BUDGET_BYTES) {
+      if (entry) {
+        const outlinedSections = Object.entries(entry)
+          .map(([name, value]) => ({
+            name,
+            bytes: Buffer.byteLength(JSON.stringify(value), 'utf8'),
+          }))
+          .sort((a, b) => b.bytes - a.bytes);
+        ctx.enrich.notice(
+          `Re-call with accessions:["${entry.accession}"] and sections:[...] to retrieve selected sections; use section_limit and section_offset for one list section.`,
+        );
+        return { kind: 'outline' as const, sections: outlinedSections };
       }
+      ctx.enrich.notice(
+        'Re-call each outlined accession individually with accessions:[accession] for its full record or section outline.',
+      );
+      return {
+        kind: 'outline' as const,
+        outlinedEntries: succeeded.map((value) => ({
+          accession: value.accession,
+          bytes: Buffer.byteLength(JSON.stringify(value), 'utf8'),
+        })),
+        failed,
+      };
     }
 
     if (failed.length > 0) {
@@ -597,141 +634,140 @@ export const getEntry = tool('uniprot_get_entry', {
         failed: failed.length,
       });
     }
-    return { kind: 'full' as const, succeeded, failed };
+    return inline;
   },
 
-  format: (result) => {
-    const lines = [`**Result kind:** ${result.kind}`];
-
-    if (result.sections?.length) {
-      // Outline arm: a single oversized record returned as a section listing.
-      lines.push('Record too large — re-call with sections:[...] to pull only what you need.');
-      for (const s of result.sections) lines.push(`- **${s.name}** — ${s.bytes} bytes`);
-    }
-    const windowSection = result.window?.section;
-    /** How many items of a capped list render: the whole windowed section, else the first LIST_CAP. */
-    const capFor = (key: string) => (key === windowSection ? Number.POSITIVE_INFINITY : LIST_CAP);
-    for (const e of result.succeeded ?? []) {
-      /** The line naming what a capped list left out and how to page it — nothing when it rendered whole. */
-      const leftOut = (key: string, label: string, total: number) =>
-        total > capFor(key)
-          ? [
-              `- … ${total - LIST_CAP} more ${label} not shown — re-call with accessions:["${e.accession}"], sections:["${key}"], section_offset:${LIST_CAP}, section_limit:100 for items ${LIST_CAP + 1}–${Math.min(total, LIST_CAP + 100)} of ${total}.`,
-            ]
-          : [];
-      lines.push(`# ${e.proteinName ?? e.entryName} (${e.accession})`);
-      lines.push(`**Entry:** ${e.entryName}`);
-      lines.push(
-        [
-          e.reviewed ? 'Reviewed (Swiss-Prot)' : 'Unreviewed (TrEMBL)',
-          `Score ${e.annotationScore}/5`,
-          `${e.length} aa`,
-          e.proteinExistence,
-        ].join(' · '),
-      );
-      lines.push(
-        `**Organism:** ${e.organism.scientificName}${e.organism.commonName ? ` (${e.organism.commonName})` : ''}${e.organism.mnemonic ? ` "${e.organism.mnemonic}"` : ''} [taxon ${e.organism.taxonId}]`,
-      );
-      if (e.genes.length) lines.push(`**Genes:** ${e.genes.join(', ')}`);
-      if (result.window) {
-        const { section, offset } = result.window;
-        const count = (e[section as keyof Entry] as unknown[] | undefined)?.length ?? 0;
-        lines.push(
-          count > 0
-            ? `**Window:** \`${section}\` items ${offset + 1}–${offset + count} (section_offset ${offset})`
-            : `**Window:** \`${section}\` — no items at section_offset ${offset}`,
-        );
-      }
-      if (e.function?.length)
-        lines.push(
-          `**Function:** ${e.function
-            .map((f) => `${f.value}${f.evidence?.length ? ` (${f.evidence.join(', ')})` : ''}`)
-            .join(' ')}`,
-        );
-      if (e.catalyticActivity?.length) {
-        lines.push('**Catalytic activity:**');
-        for (const r of e.catalyticActivity)
-          lines.push(
-            `- ${r.name}${r.rheaId ? ` (${r.rheaId})` : ''}${r.ecNumber ? ` [EC ${r.ecNumber}]` : ''}`,
-          );
-      }
-      if (e.cofactors?.length)
-        lines.push(
-          `**Cofactors:** ${e.cofactors.map((c) => `${c.name}${c.chebiId ? ` (${c.chebiId})` : ''}`).join(', ')}`,
-        );
-      if (e.subcellularLocation?.length)
-        lines.push(
-          `**Subcellular location:** ${e.subcellularLocation.map((l) => l.location + (l.topology ? ` (${l.topology})` : '')).join('; ')}`,
-        );
-      if (e.disease?.length) {
-        lines.push('**Disease:**');
-        for (const d of e.disease)
-          lines.push(
-            `- ${d.name}${d.acronym ? ` (${d.acronym})` : ''}${d.omimId ? ` [OMIM:${d.omimId}]` : ''}${d.diseaseId ? ` [${d.diseaseId}]` : ''}${d.description ? `: ${d.description}` : ''}`,
-          );
-      }
-      if (e.variants?.length) {
-        lines.push(
-          `**Variants:** ${e.variants.length} natural variant(s)${windowSection === 'variants' ? ' in this window' : ''}`,
-        );
-        for (const v of e.variants.slice(0, capFor('variants'))) {
-          const pos =
-            v.location.start === v.location.end || v.location.end == null
-              ? `${v.location.start ?? '?'}`
-              : `${v.location.start ?? '?'}-${v.location.end}`;
-          lines.push(
-            `- ${pos}${v.original && v.variation ? ` ${v.original}→${v.variation}` : ''}${v.featureId ? ` [${v.featureId}]` : ''}${v.description ? `: ${v.description}` : ''}`,
-          );
-        }
-        lines.push(...leftOut('variants', 'variants', e.variants.length));
-      }
-      if (e.ptms?.length) {
-        lines.push(
-          `**PTMs:** ${e.ptms.length}${windowSection === 'ptms' ? ' in this window' : ''}`,
-        );
-        for (const p of e.ptms.slice(0, capFor('ptms'))) {
-          const range =
-            p.location.start != null
-              ? ` @${p.location.start}${p.location.end != null && p.location.end !== p.location.start ? `-${p.location.end}` : ''}`
-              : '';
-          lines.push(
-            `- ${p.type}${range}${p.featureId ? ` [${p.featureId}]` : ''}${p.description ? `: ${p.description}` : ''}`,
-          );
-        }
-        lines.push(...leftOut('ptms', 'PTMs', e.ptms.length));
-      }
-      if (e.domains?.length) {
-        lines.push('**Domains/regions:**');
-        for (const d of e.domains.slice(0, capFor('domains')))
-          lines.push(
-            `- ${d.type}${d.location.start != null ? ` ${d.location.start}-${d.location.end ?? '?'}` : ''}${d.featureId ? ` [${d.featureId}]` : ''}${d.description ? `: ${d.description}` : ''}`,
-          );
-        lines.push(...leftOut('domains', 'domains', e.domains.length));
-      }
-      if (e.isoforms?.length)
-        lines.push(
-          `**Isoforms:** ${e.isoforms.map((i) => `${i.isoformId}${i.name ? ` (${i.name})` : ''}${i.sequenceStatus ? ` [${i.sequenceStatus}]` : ''}`).join(', ')}`,
-        );
-      if (e.goTerms?.length)
-        lines.push(`**GO:** ${e.goTerms.map((g) => `${g.id} [${g.aspect}] ${g.term}`).join('; ')}`);
-      if (e.keywords?.length)
-        lines.push(
-          `**Keywords:** ${e.keywords.map((k) => `${k.name} (${k.id})${k.category ? ` — ${k.category}` : ''}`).join(', ')}`,
-        );
-      if (e.xrefs && Object.keys(e.xrefs).length) {
-        lines.push('**Cross-references:**');
-        // xrefs is a record, not a list section — section_limit cannot page it; the full set rides structuredContent.
-        for (const [db, ids] of Object.entries(e.xrefs))
-          lines.push(
-            `- ${db}: ${ids.slice(0, XREF_CAP).join(', ')}${ids.length > XREF_CAP ? ` (+${ids.length - XREF_CAP} more ${db} ids not shown — all ${ids.length} are in structuredContent xrefs.${db})` : ''}`,
-          );
-      }
-      lines.push('');
-    }
-    if (result.failed?.length) {
-      lines.push('### Not found');
-      for (const f of result.failed) lines.push(`- **${f.accession}** — ${f.error}`);
-    }
-    return [{ type: 'text', text: lines.join('\n').trim() }];
-  },
+  format: formatEntryResult,
 });
+
+/** Render every value returned by an entry call, including caller-selected section windows. */
+function formatEntryResult(result: {
+  kind: 'full' | 'outline';
+  succeeded?: z.infer<typeof EntrySchema>[];
+  failed?: { accession: string; error: string }[];
+  sections?: { name: string; bytes: number }[];
+  outlinedEntries?: { accession: string; bytes: number }[];
+  window?: { section: string; offset: number };
+}): { type: 'text'; text: string }[] {
+  const lines = [`**Result kind:** ${result.kind}`];
+
+  if (result.sections?.length) {
+    // Outline arm: a single oversized record returned as a section listing.
+    lines.push('Record too large — re-call with sections:[...] to pull only what you need.');
+    for (const s of result.sections) lines.push(`- **${s.name}** — ${s.bytes} bytes`);
+  }
+  for (const e of result.outlinedEntries ?? [])
+    lines.push(
+      `- **${e.accession}** — ${e.bytes} bytes; re-call with accessions:["${e.accession}"].`,
+    );
+  const windowSection = result.window?.section;
+  for (const e of result.succeeded ?? []) {
+    lines.push(`# ${e.proteinName ?? e.entryName} (${e.accession})`);
+    lines.push(`**Entry:** ${e.entryName}`);
+    lines.push(
+      [
+        e.reviewed ? 'Reviewed (Swiss-Prot)' : 'Unreviewed (TrEMBL)',
+        `Score ${e.annotationScore}/5`,
+        `${e.length} aa`,
+        e.proteinExistence,
+      ].join(' · '),
+    );
+    lines.push(
+      `**Organism:** ${e.organism.scientificName}${e.organism.commonName ? ` (${e.organism.commonName})` : ''}${e.organism.mnemonic ? ` "${e.organism.mnemonic}"` : ''} [taxon ${e.organism.taxonId}]`,
+    );
+    if (e.genes.length) lines.push(`**Genes:** ${e.genes.join(', ')}`);
+    if (result.window) {
+      const { section, offset } = result.window;
+      const count = (e[section as keyof Entry] as unknown[] | undefined)?.length ?? 0;
+      lines.push(
+        count > 0
+          ? `**Window:** \`${section}\` items ${offset + 1}–${offset + count} (section_offset ${offset})`
+          : `**Window:** \`${section}\` — no items at section_offset ${offset}`,
+      );
+    }
+    if (e.function?.length)
+      lines.push(
+        `**Function:** ${e.function
+          .map((f) => `${f.value}${f.evidence?.length ? ` (${f.evidence.join(', ')})` : ''}`)
+          .join(' ')}`,
+      );
+    if (e.catalyticActivity?.length) {
+      lines.push('**Catalytic activity:**');
+      for (const r of e.catalyticActivity)
+        lines.push(
+          `- ${r.name}${r.rheaId ? ` (${r.rheaId})` : ''}${r.ecNumber ? ` [EC ${r.ecNumber}]` : ''}`,
+        );
+    }
+    if (e.cofactors?.length)
+      lines.push(
+        `**Cofactors:** ${e.cofactors.map((c) => `${c.name}${c.chebiId ? ` (${c.chebiId})` : ''}`).join(', ')}`,
+      );
+    if (e.subcellularLocation?.length)
+      lines.push(
+        `**Subcellular location:** ${e.subcellularLocation.map((l) => l.location + (l.topology ? ` (${l.topology})` : '')).join('; ')}`,
+      );
+    if (e.disease?.length) {
+      lines.push('**Disease:**');
+      for (const d of e.disease)
+        lines.push(
+          `- ${d.name}${d.acronym ? ` (${d.acronym})` : ''}${d.omimId ? ` [OMIM:${d.omimId}]` : ''}${d.diseaseId ? ` [${d.diseaseId}]` : ''}${d.description ? `: ${d.description}` : ''}`,
+        );
+    }
+    if (e.variants?.length) {
+      lines.push(
+        `**Variants:** ${e.variants.length} natural variant(s)${windowSection === 'variants' ? ' in this window' : ''}`,
+      );
+      for (const v of e.variants) {
+        const pos =
+          v.location.start === v.location.end || v.location.end == null
+            ? `${v.location.start ?? '?'}`
+            : `${v.location.start ?? '?'}-${v.location.end}`;
+        lines.push(
+          `- ${pos}${v.original && v.variation ? ` ${v.original}→${v.variation}` : ''}${v.featureId ? ` [${v.featureId}]` : ''}${v.description ? `: ${v.description}` : ''}`,
+        );
+      }
+    }
+    if (e.ptms?.length) {
+      lines.push(`**PTMs:** ${e.ptms.length}${windowSection === 'ptms' ? ' in this window' : ''}`);
+      for (const p of e.ptms) {
+        const range =
+          p.location.start != null
+            ? ` @${p.location.start}${p.location.end != null && p.location.end !== p.location.start ? `-${p.location.end}` : ''}`
+            : '';
+        lines.push(
+          `- ${p.type}${range}${p.featureId ? ` [${p.featureId}]` : ''}${p.description ? `: ${p.description}` : ''}`,
+        );
+      }
+    }
+    if (e.domains?.length) {
+      lines.push('**Domains/regions:**');
+      for (const d of e.domains)
+        lines.push(
+          `- ${d.type}${d.location.start != null ? ` ${d.location.start}-${d.location.end ?? '?'}` : ''}${d.featureId ? ` [${d.featureId}]` : ''}${d.description ? `: ${d.description}` : ''}`,
+        );
+    }
+    if (e.isoforms?.length)
+      lines.push(
+        `**Isoforms:** ${e.isoforms.map((i) => `${i.isoformId}${i.name ? ` (${i.name})` : ''}${i.sequenceStatus ? ` [${i.sequenceStatus}]` : ''}`).join(', ')}`,
+      );
+    if (e.goTerms?.length)
+      lines.push(`**GO:** ${e.goTerms.map((g) => `${g.id} [${g.aspect}] ${g.term}`).join('; ')}`);
+    if (e.keywords?.length)
+      lines.push(
+        `**Keywords:** ${e.keywords.map((k) => `${k.name} (${k.id})${k.category ? ` — ${k.category}` : ''}`).join(', ')}`,
+      );
+    if (e.xrefs && Object.keys(e.xrefs).length) {
+      lines.push('**Cross-references:**');
+      for (const [db, ids] of Object.entries(e.xrefs))
+        lines.push(
+          `- ${markdown().inlineCode(db).build()}: ${ids.map((id) => markdown().inlineCode(id).build()).join(', ')}`,
+        );
+    }
+    lines.push('');
+  }
+  if (result.failed?.length) {
+    lines.push('### Not found');
+    for (const f of result.failed) lines.push(`- **${f.accession}** — ${f.error}`);
+  }
+  return [{ type: 'text', text: lines.join('\n').trim() }];
+}
