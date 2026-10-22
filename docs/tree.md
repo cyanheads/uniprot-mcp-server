@@ -1,6 +1,6 @@
 # uniprot-mcp-server - Directory Structure
 
-Generated on: 2026-10-09 04:23:59
+Generated on: 2026-10-22 03:42:19
 
 ```text
 uniprot-mcp-server/
@@ -26,6 +26,7 @@ uniprot-mcp-server/
 ├── changelog/
 │   ├── 0.1.x/
 │   ├── 0.2.x/
+│   ├── 0.3.x/
 │   └── template.md
 ├── docs/
 │   ├── design.md
@@ -156,16 +157,21 @@ uniprot-mcp-server/
 │   │           └── uniprot-search-proteins.tool.ts
 │   ├── services/
 │   │   └── uniprot/
+│   │       ├── proteome-query.ts
+│   │       ├── query-cursor.ts
 │   │       ├── types.ts
 │   │       └── uniprot-service.ts
 │   └── index.ts
 ├── tests/
+│   ├── fixtures/
+│   │   └── p00918-xrefs.json
 │   ├── prompts/
 │   │   └── uniprot-protein-dossier.prompt.test.ts
 │   ├── resources/
 │   │   ├── uniprot-entry.resource.test.ts
 │   │   └── uniprot-taxonomy.resource.test.ts
 │   ├── services/
+│   │   ├── query-cursor.test.ts
 │   │   └── uniprot-service.test.ts
 │   ├── tools/
 │   │   ├── uniprot-get-entry.tool.test.ts

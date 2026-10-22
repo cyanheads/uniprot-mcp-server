@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-10-22 · ⚠️ Breaking
+
+Complete entry rendering and query-bound pagination cursors.
+
 ## [0.2.6](changelog/0.2.x/0.2.6.md) — 2026-10-12
 
 Fixes query grouping and reviewed:false in uniprot_search_proteins, reports merged and deleted accessions instead of hollow records, pages taxonomy children and long uniprot_get_entry sections, types UniProt query, field and cursor rejections, and adopts mcp-ts-core 0.13.15.
