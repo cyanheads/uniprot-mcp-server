@@ -14,6 +14,7 @@
 import { JsonRpcErrorCode, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { SearchPage } from '@/services/uniprot/types.js';
 import {
   activeRawEntry,
@@ -22,6 +23,7 @@ import {
   INACTIVE_MESSAGES,
   INACTIVE_STUBS,
   rejectUnmockedFetch,
+  requestedUrls,
   required,
   routeUpstream,
   UNIPROT_400_BODIES,
@@ -174,6 +176,76 @@ describe('searchProteins inactive hits (real service, through runToolContract)',
 });
 
 describe('searchProteins validation', () => {
+  it('walks three real-service pages while fields, facets, and size change', async () => {
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname !== '/uniprotkb/search') return;
+      const position = url.searchParams.get('cursor');
+      const response = upstreamResponse(200, {
+        results: [
+          activeRawEntry(
+            position === 'third' ? 'P00439' : position === 'second' ? 'P38398' : 'P04637',
+            'ENTRY',
+          ),
+        ],
+      });
+      response.headers.set('x-total-results', '3');
+      if (position !== 'third')
+        response.headers.set(
+          'link',
+          `<https://rest.uniprot.org/uniprotkb/search?cursor=${position === 'second' ? 'third' : 'second'}>; rel="next"`,
+        );
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    searchMock.mockImplementation(realService.search.bind(realService));
+    let cursor: string | undefined;
+    const seen: string[] = [];
+    for (const size of [1, 2, 3]) {
+      const result = await runToolContract(searchProteins, {
+        query: 'gene:TP53',
+        cursor,
+        size,
+        ...(size > 1 ? { fields: 'accession', facets: 'reviewed' } : {}),
+      });
+      expect(result.isError).toBeFalsy();
+      const out = result.structuredContent as { results: { accession: string }[]; cursor?: string };
+      seen.push(...out.results.map((hit) => hit.accession));
+      cursor = out.cursor;
+      if (cursor) expect(contentText(result)).toContain(cursor);
+    }
+    expect(seen).toEqual(['P04637', 'P38398', 'P00439']);
+    expect(cursor).toBeUndefined();
+    expect(requestedUrls(fetchStub).map((url) => url.searchParams.get('cursor'))).toEqual([
+      null,
+      'second',
+      'third',
+    ]);
+  });
+
+  it.each([
+    { query: 'gene:BRCA1' },
+    { query: 'gene:TP53', organism_id: 9606 },
+    { query: 'gene:TP53', reviewed: false },
+  ])('rejects changed effective query before paging: %j', async (input) => {
+    searchMock.mockResolvedValue({ ...onePage, cursor: 'next' });
+    const first = await runToolContract(searchProteins, { query: 'gene:TP53' });
+    const cursor = (first.structuredContent as { cursor: string }).cursor;
+    searchMock.mockClear();
+    const result = await runToolContract(searchProteins, { ...input, cursor });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_cursor' });
+    expect(contentText(result)).toContain('no cursor');
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+  it('rejects legacy raw cursors before the service request with restart recovery', async () => {
+    searchMock.mockResolvedValue(onePage);
+    const result = await runToolContract(searchProteins, {
+      query: 'gene:TP53',
+      cursor: 'raw-cursor',
+    });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_cursor' });
+    expect(contentText(result)).toContain('no cursor');
+    expect(searchMock).not.toHaveBeenCalled();
+  });
   it('throws missing_query when neither text_search nor query is provided', async () => {
     const ctx = createMockContext({ errors: searchProteins.errors });
     const input = searchProteins.input.parse({});
@@ -377,13 +449,23 @@ describe('searchProteins handler', () => {
     const input = searchProteins.input.parse({ text_search: 'kinase' });
 
     await searchProteins.handler(input, ctx);
-    expect(getEnrichment(ctx)).toMatchObject({ cursor: 'NEXT' });
+    expect(
+      queryCursor.decode(
+        getEnrichment(ctx).cursor as string,
+        'uniprot_search_proteins',
+        '(kinase) AND reviewed:true',
+      ),
+    ).toBe('NEXT');
   });
 
   it('passes the page size and a returned cursor through to the next search', async () => {
     searchMock.mockResolvedValue(onePage);
     const ctx = createMockContext({ errors: searchProteins.errors });
-    const input = searchProteins.input.parse({ text_search: 'kinase', size: 5, cursor: 'NEXT' });
+    const input = searchProteins.input.parse({
+      text_search: 'kinase',
+      size: 5,
+      cursor: queryCursor.encode('NEXT', 'uniprot_search_proteins', '(kinase) AND reviewed:true'),
+    });
 
     await searchProteins.handler(input, ctx);
     expect(searchMock).toHaveBeenCalledWith(expect.any(String), { size: 5, cursor: 'NEXT' }, ctx);
@@ -402,7 +484,13 @@ describe('searchProteins handler', () => {
       .extend(required(searchProteins.enrichment, 'searchProteins.enrichment'))
       .parse({ ...result, ...getEnrichment(ctx) });
     expect(effective.totalResults).toBe(4457);
-    expect(effective.cursor).toBe('NEXT');
+    expect(
+      queryCursor.decode(
+        effective.cursor,
+        'uniprot_search_proteins',
+        '(kinase) AND organism_id:9606 AND reviewed:true',
+      ),
+    ).toBe('NEXT');
     expect(effective.effectiveQuery).toContain('organism_id:9606');
   });
 
@@ -549,7 +637,14 @@ describe('searchProteins upstream rejection (through runToolContract)', () => {
     searchMock.mockImplementation(realService.search.bind(realService));
     vi.useFakeTimers();
     try {
-      const pending = runToolContract(searchProteins, { query: 'gene:TP53', cursor: 'garbage' });
+      const pending = runToolContract(searchProteins, {
+        query: 'gene:TP53',
+        cursor: queryCursor.encode(
+          'garbage',
+          'uniprot_search_proteins',
+          '(gene:TP53) AND reviewed:true',
+        ),
+      });
       await vi.runAllTimersAsync();
       const result = await pending;
       const envelope = errorEnvelope(result);

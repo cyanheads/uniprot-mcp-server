@@ -9,6 +9,8 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { getServerConfig } from '@/config/server-config.js';
+import { proteomeQuery } from '@/services/uniprot/proteome-query.js';
+import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { ProteomeProteinPage } from '@/services/uniprot/types.js';
 import { unbalancedParenthesis } from '@/services/uniprot/types.js';
 import { getUniProtService, isCursorRejection } from '@/services/uniprot/uniprot-service.js';
@@ -93,7 +95,7 @@ export const getProteome = tool('uniprot_get_proteome', {
       .string()
       .optional()
       .describe(
-        'Forward-pagination cursor from a prior protein page. Only meaningful with include_proteins.',
+        'Opaque cursor from this tool for the same resolved UPID and exact query. Identifier aliases resolving to that UPID and size changes are allowed. Older raw cursors are rejected; restart without cursor. Only meaningful with include_proteins.',
       ),
   }),
   output: z.object({
@@ -198,7 +200,7 @@ export const getProteome = tool('uniprot_get_proteome', {
     {
       reason: 'invalid_cursor',
       code: JsonRpcErrorCode.InvalidParams,
-      when: 'UniProt could not continue from the protein cursor (it answered HTTP 500) — the cursor is malformed or truncated.',
+      when: 'The protein cursor is malformed, from an older version, belongs to another tool, resolved UPID or query, or UniProt could not continue from it (HTTP 500).',
       recovery:
         'Re-call with the same proteome, query, and include_proteins but no cursor to restart from the first page.',
     },
@@ -238,6 +240,8 @@ export const getProteome = tool('uniprot_get_proteome', {
     }
 
     const cap = input.size ?? getServerConfig().defaultPageSize;
+    const effectiveQuery = proteomeQuery(proteome.upid, input.query);
+    const cursor = queryCursor.decode(input.cursor, 'uniprot_get_proteome', effectiveQuery);
     let page: ProteomeProteinPage;
     try {
       page = await service.getProteomeProteins(
@@ -245,7 +249,7 @@ export const getProteome = tool('uniprot_get_proteome', {
         {
           ...(input.query ? { query: input.query } : {}),
           size: cap,
-          ...(input.cursor ? { cursor: input.cursor } : {}),
+          ...(cursor ? { cursor } : {}),
         },
         ctx,
       );
@@ -268,7 +272,9 @@ export const getProteome = tool('uniprot_get_proteome', {
         cap,
         guidance: `Showing ${page.proteins.length} of ${page.totalResults} proteins. Walk the cursor for more, or narrow with the query filter.`,
       });
-      ctx.enrich({ cursor: page.cursor });
+      ctx.enrich({
+        cursor: queryCursor.encode(page.cursor, 'uniprot_get_proteome', effectiveQuery),
+      });
     } else {
       ctx.enrich({ shown: page.proteins.length });
     }

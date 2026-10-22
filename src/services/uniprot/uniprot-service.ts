@@ -22,6 +22,7 @@ import type { StorageService } from '@cyanheads/mcp-ts-core/storage';
 import type { RequestContext } from '@cyanheads/mcp-ts-core/utils';
 import { fetchWithTimeout, requestContextService, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
+import { proteomeQuery } from '@/services/uniprot/proteome-query.js';
 import type {
   Cofactor,
   Disease,
@@ -57,7 +58,6 @@ import {
   DEFAULT_ENTRY_FIELDS,
   DEFAULT_SEARCH_FIELDS,
   describeInactive,
-  groupClause,
   MANDATORY_ENTRY_FIELDS,
   MANDATORY_SEARCH_FIELDS,
   TAXON_CHILDREN_PAGE_SIZE,
@@ -784,10 +784,8 @@ export class UniProtService {
     opts: { query?: string; size?: number; cursor?: string },
     ctx: Context,
   ): Promise<ProteomeProteinPage> {
-    const queryParts = [`proteome:${upid}`];
-    if (opts.query) queryParts.push(groupClause(opts.query));
     const page = await this.search(
-      queryParts.join(' AND '),
+      proteomeQuery(upid, opts.query),
       {
         ...(opts.size ? { size: opts.size } : {}),
         ...(opts.cursor ? { cursor: opts.cursor } : {}),

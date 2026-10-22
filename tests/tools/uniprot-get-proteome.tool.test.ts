@@ -11,6 +11,7 @@
 import { JsonRpcErrorCode, notFound, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { Proteome, ProteomeProteinPage } from '@/services/uniprot/types.js';
 import {
   contentText,
@@ -79,6 +80,66 @@ afterEach(() => {
 });
 
 describe('getProteome', () => {
+  it('continues across resolved identifier aliases and page sizes, rejecting another proteome or query before paging', async () => {
+    getProteomeMock.mockResolvedValue(humanProteome);
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname !== '/uniprotkb/search') return;
+      const response = upstreamResponse(200, { results: [RAW_ENTRIES.p53] });
+      response.headers.set('x-total-results', '3');
+      const position = url.searchParams.get('cursor');
+      if (position !== 'third')
+        response.headers.set(
+          'link',
+          `<https://rest.uniprot.org/uniprotkb/search?cursor=${position === 'second' ? 'third' : 'second'}>; rel="next"`,
+        );
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    getProteomeProteinsMock.mockImplementation(realService.getProteomeProteins.bind(realService));
+    const first = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+    });
+    const cursor = (first.structuredContent as { cursor: string }).cursor;
+    expect(contentText(first)).toContain(cursor);
+    const second = await runToolContract(getProteome, {
+      taxon_id: 9606,
+      include_proteins: true,
+      cursor,
+      size: 2,
+    });
+    const secondCursor = (second.structuredContent as { cursor: string }).cursor;
+    expect(contentText(second)).toContain(secondCursor);
+    const third = await runToolContract(getProteome, {
+      taxon_id: 9606,
+      include_proteins: true,
+      cursor: secondCursor,
+      size: 3,
+    });
+    expect(third.isError).toBeFalsy();
+    expect(third.structuredContent).not.toHaveProperty('cursor');
+    expect(requestedUrls(fetchStub).map((url) => url.searchParams.get('cursor'))).toEqual([
+      null,
+      'second',
+      'third',
+    ]);
+    getProteomeProteinsMock.mockClear();
+    const changedQuery = await runToolContract(getProteome, {
+      taxon_id: 9606,
+      include_proteins: true,
+      query: 'reviewed:true',
+      cursor,
+    });
+    expect(errorEnvelope(changedQuery).data).toMatchObject({ reason: 'invalid_cursor' });
+    getProteomeMock.mockResolvedValue({ ...humanProteome, upid: 'UP000000625' });
+    const changedProteome = await runToolContract(getProteome, {
+      upid: 'UP000000625',
+      include_proteins: true,
+      cursor,
+    });
+    expect(errorEnvelope(changedProteome).data).toMatchObject({ reason: 'invalid_cursor' });
+    expect(getProteomeProteinsMock).not.toHaveBeenCalled();
+  });
   it('throws missing_identifier when neither upid nor taxon_id is provided', async () => {
     const ctx = createMockContext({ errors: getProteome.errors });
     const input = getProteome.input.parse({});
@@ -200,9 +261,15 @@ describe('getProteome', () => {
       truncated: true,
       cap: 1,
       shown: 1,
-      cursor: 'NEXT_CURSOR',
       totalProteinsMatched: 147506,
     });
+    expect(
+      queryCursor.decode(
+        getEnrichment(ctx).cursor as string,
+        'uniprot_get_proteome',
+        'proteome:UP000005640',
+      ),
+    ).toBe('NEXT_CURSOR');
   });
 
   it('declares the truncation guidance so it reaches content[], not only the store', async () => {
@@ -402,7 +469,11 @@ describe('getProteome', () => {
         taxon_id: 9606,
         include_proteins: true,
         query: 'reviewed:true',
-        cursor: 'garbage',
+        cursor: queryCursor.encode(
+          'garbage',
+          'uniprot_get_proteome',
+          'proteome:UP000005640 AND (reviewed:true)',
+        ),
       });
       await vi.runAllTimersAsync();
       const result = await pending;
@@ -508,7 +579,7 @@ describe('getProteome', () => {
       taxon_id: 9606,
       include_proteins: true,
       size: 2,
-      cursor: 'cur-0',
+      cursor: queryCursor.encode('cur-0', 'uniprot_get_proteome', 'proteome:UP000005640'),
     });
 
     expect(result.isError).toBeFalsy();
@@ -534,7 +605,11 @@ describe('getProteome', () => {
       ]),
     );
     // The page continues: the next cursor and the total ride the enrichment.
-    expect(text).toContain('cur-1');
+    const nextCursor = (result.structuredContent as { cursor: string }).cursor;
+    expect(queryCursor.decode(nextCursor, 'uniprot_get_proteome', 'proteome:UP000005640')).toBe(
+      'cur-1',
+    );
+    expect(text).toContain(nextCursor);
     expect(text).toContain('Showing 2 of 20420 proteins.');
   });
 

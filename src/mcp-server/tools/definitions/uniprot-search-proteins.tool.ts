@@ -10,6 +10,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { SearchPage } from '@/services/uniprot/types.js';
 import {
   describeInactiveInFull,
@@ -149,7 +150,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .string()
       .optional()
       .describe(
-        'Opaque forward-pagination cursor from a prior response. Walk pages with this; random access to page N is not supported.',
+        'Opaque forward cursor from this tool for the same exact effective query and filters. Size, fields, and facets may change. Older raw cursors are rejected; restart without cursor. Random access to page N is not supported.',
       ),
   }),
   output: z.object({
@@ -228,7 +229,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
     {
       reason: 'invalid_cursor',
       code: JsonRpcErrorCode.InvalidParams,
-      when: 'UniProt could not continue from the cursor (it answered HTTP 500) — the cursor is malformed or truncated.',
+      when: 'The cursor is malformed, from an older version, belongs to another tool or effective query, or UniProt could not continue from it (HTTP 500).',
       recovery:
         'Re-call with the same query and filters but no cursor to restart from the first page.',
     },
@@ -264,6 +265,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
     const effectiveQuery = filters.length
       ? [groupClause(clause), ...filters].join(' AND ')
       : clause;
+    const cursor = queryCursor.decode(input.cursor, 'uniprot_search_proteins', effectiveQuery);
 
     let page: SearchPage;
     try {
@@ -273,7 +275,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
           ...(input.fields ? { fields: input.fields } : {}),
           ...(input.facets ? { facets: input.facets } : {}),
           ...(input.size ? { size: input.size } : {}),
-          ...(input.cursor ? { cursor: input.cursor } : {}),
+          ...(cursor ? { cursor } : {}),
         },
         ctx,
       );
@@ -291,7 +293,10 @@ export const searchProteins = tool('uniprot_search_proteins', {
 
     ctx.enrich.echo(effectiveQuery);
     ctx.enrich({ totalResults: page.totalResults });
-    if (page.cursor) ctx.enrich({ cursor: page.cursor });
+    if (page.cursor)
+      ctx.enrich({
+        cursor: queryCursor.encode(page.cursor, 'uniprot_search_proteins', effectiveQuery),
+      });
     const tier = callerPinsTier ? 'from query' : input.reviewed ? 'reviewed' : 'both';
     if (page.results.length === 0 && page.inactive.length === 0) {
       ctx.enrich.notice(
