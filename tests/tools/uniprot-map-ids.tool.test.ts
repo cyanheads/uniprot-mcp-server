@@ -59,6 +59,33 @@ afterEach(() => {
 });
 
 describe('mapIds validation', () => {
+  it('translates a real continuation HTTP 400 into safe typed recovery', async () => {
+    const fetchStub = routeUpstream((url) =>
+      url.pathname === '/idmapping/results/Abc123'
+        ? upstreamResponse(400, { messages: ['For input string: decoded garbage'] })
+        : undefined,
+    );
+    vi.stubGlobal('fetch', fetchStub);
+    resumeMappingPageMock.mockImplementation(realService.resumeMappingPage.bind(realService));
+    const result = await runToolContract(mapIds, {
+      continuation: { jobId: 'Abc123', cursor: 'garbage' },
+    });
+    expect(errorEnvelope(result)).toMatchObject({
+      code: JsonRpcErrorCode.NotFound,
+      message: 'UniProt rejected the completed mapping page continuation.',
+      data: {
+        reason: 'invalid_continuation',
+        recovery: {
+          hint: 'Restart the mapping job and use each returned continuation before it expires.',
+        },
+      },
+    });
+    expect(contentText(result)).not.toContain('decoded garbage');
+    expect(contentText(result)).toContain('Recovery:');
+    expect(requestedUrls(fetchStub).map((url) => url.pathname)).toEqual([
+      '/idmapping/results/Abc123',
+    ]);
+  });
   it('throws missing_inputs when neither a ticket nor from/to/ids is provided', async () => {
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({});
@@ -583,6 +610,95 @@ describe('mapIds resume path', () => {
 });
 
 describe('mapIds completed-page continuation', () => {
+  it.each(['network', 'timeout'])(
+    'preserves %s failures through the real continuation request',
+    async (failure) => {
+      const fetchStub =
+        failure === 'network'
+          ? vi.fn().mockRejectedValue(new TypeError('fetch failed'))
+          : vi.fn(
+              (_url: unknown, options: RequestInit) =>
+                new Promise<Response>((_resolve, reject) =>
+                  options.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+                    once: true,
+                  }),
+                ),
+            );
+      vi.stubGlobal('fetch', fetchStub);
+      resumeMappingPageMock.mockImplementation(realService.resumeMappingPage.bind(realService));
+      vi.useFakeTimers();
+      try {
+        const pending = runToolContract(mapIds, {
+          continuation: { jobId: 'Abc123', cursor: 'cursor' },
+        });
+        await vi.runAllTimersAsync();
+        const result = await pending;
+        expect(errorEnvelope(result).code).toBe(
+          failure === 'network' ? JsonRpcErrorCode.ServiceUnavailable : JsonRpcErrorCode.Timeout,
+        );
+        expect(errorEnvelope(result).data?.reason).toBeUndefined();
+        expect(contentText(result)).not.toContain('invalid_continuation');
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('propagates caller cancellation during the continuation fetch', async () => {
+    const controller = new AbortController();
+    const started = Promise.withResolvers<void>();
+    const fetchStub = vi.fn((_url: unknown, options: RequestInit) => {
+      started.resolve();
+      return new Promise<Response>((_resolve, reject) =>
+        options.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+          once: true,
+        }),
+      );
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    resumeMappingPageMock.mockImplementation(realService.resumeMappingPage.bind(realService));
+    const pending = runToolContract(
+      mapIds,
+      { continuation: { jobId: 'Abc123', cursor: 'cursor' } },
+      { context: { signal: controller.signal } },
+    );
+    await started.promise;
+    controller.abort();
+    const result = await pending;
+    expect(errorEnvelope(result).code).toBe(JsonRpcErrorCode.RequestCancelled);
+    expect(errorEnvelope(result).message).toBe('uniprot.mappingResults failed upstream (-32011).');
+    expect(contentText(result)).toBe('Error: uniprot.mappingResults failed upstream (-32011).');
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    [500, JsonRpcErrorCode.ServiceUnavailable],
+    [502, JsonRpcErrorCode.ServiceUnavailable],
+    [503, JsonRpcErrorCode.ServiceUnavailable],
+    [429, JsonRpcErrorCode.RateLimited],
+  ])('preserves upstream HTTP %i on a continuation', async (status, code) => {
+    const fetchStub = routeUpstream((url) =>
+      url.pathname === '/idmapping/results/Abc123'
+        ? upstreamResponse(status, { messages: ['upstream private details'] })
+        : undefined,
+    );
+    vi.stubGlobal('fetch', fetchStub);
+    resumeMappingPageMock.mockImplementation(realService.resumeMappingPage.bind(realService));
+    vi.useFakeTimers();
+    try {
+      const pending = runToolContract(mapIds, {
+        continuation: { jobId: 'Abc123', cursor: 'cursor' },
+      });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+      expect(errorEnvelope(result).code).toBe(code);
+      expect(errorEnvelope(result).data?.reason).toBeUndefined();
+      expect(contentText(result)).not.toContain('upstream private details');
+      expect(contentText(result)).not.toContain('invalid_continuation');
+      expect(fetchStub.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('propagates failed IDs and another continuation without resuming the running-job path', async () => {
     resumeMappingPageMock.mockResolvedValue({
       status: 'finished',

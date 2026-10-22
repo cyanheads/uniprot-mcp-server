@@ -180,7 +180,7 @@ export const mapIds = tool('uniprot_map_ids', {
     {
       reason: 'invalid_continuation',
       code: JsonRpcErrorCode.NotFound,
-      when: 'The completed-page continuation does not carry a UniProt job ID, or refers to a result page that is unknown or expired.',
+      when: 'The completed-page continuation has an invalid job ID, is unknown or expired, or UniProt rejected the page with HTTP 400.',
       recovery: 'Restart the mapping job and use each returned continuation before it expires.',
     },
   ],
@@ -234,6 +234,15 @@ export const mapIds = tool('uniprot_map_ids', {
       try {
         result = await service.resumeMappingPage(input.continuation, ctx);
       } catch (err) {
+        if (ctx.signal.aborted) throw err;
+        if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
+          throw ctx.fail(
+            'invalid_continuation',
+            'UniProt rejected the completed mapping page continuation.',
+            undefined,
+            { cause: err },
+          );
+        }
         if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
           throw ctx.fail(
             'invalid_continuation',
