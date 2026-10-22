@@ -63,7 +63,7 @@ All resource data is also reachable via tools — tool-only clients lose nothing
 
 - `text_search` for plain language **or** `query` for Lucene field syntax (`gene`, `organism_id`, `keyword`, `go`, `reviewed`, `protein_name`, `family`, `length`, `existence`, `accession`) — exactly one. `organism_id` filters the whole query; unbalanced parentheses are rejected. Optional `facets` return count breakdowns (e.g. `reviewed`, `model_organism`)
 - `reviewed` defaults to `true` (Swiss-Prot only); `false` searches both tiers (put `reviewed:false` in `query` for TrEMBL only). Every hit carries `reviewed`, `annotationScore`, and `proteinExistence`
-- Forward-only cursor pagination; returns `totalResults` and the effective query. A cursor UniProt can't continue from fails `invalid_cursor`: restart without it
+- Forward-only cursor pagination; returns `totalResults` and the effective query. Cursors bind to this tool and the exact assembled query, including organism/reviewed filters. Changing `size`, `fields`, or `facets` keeps continuation valid; a changed query, malformed token, or legacy raw cursor fails `invalid_cursor`: restart without it
 - Inactive accessions (merged, demerged, or deleted) go in `inactive[]` with the reason and replacements, not in `results[]`
 
 ---
@@ -72,7 +72,7 @@ All resource data is also reachable via tools — tool-only clients lose nothing
 
 - Up to 20 accessions per call, from `uniprot_search_proteins` or `uniprot_map_ids` (strip any `-N` isoform suffix). Sectioned record: function, catalytic activity, cofactors, subcellular location, disease, PTMs, natural variants, isoforms, domains, GO terms, keywords, cross-references. `fields` trims the output; identity and provenance fields are always kept
 - Resolved entries come back in `succeeded[]`, unknown or inactive ones in `failed[]`, so one bad accession doesn't abort the batch. An inactive accession's error names the merge target, the demerge products, or the UniParc ID
-- An oversized record returns `kind: "outline"` (a section listing); re-call one accession with `sections: [...]` for the parts you need. A very large list section pages with `section_limit` (1–500) and `section_offset`, reporting `totalCount` and `nextOffset`
+- Initial responses exceeding 24,000 UTF-8 bytes across `content[]` and `structuredContent` return `kind: "outline"`. A single resolved accession returns a section listing; an oversized batch returns `outlinedEntries` in request order, preserving every `failed[]` entry. Re-call each outlined accession individually, then use `sections: [...]` for the parts you need. Explicit sections render every returned item, including all cross-reference IDs; a very large list section pages with `section_limit` (1–500) and `section_offset`, reporting `totalCount` and `nextOffset`
 
 ---
 
@@ -81,6 +81,7 @@ All resource data is also reachable via tools — tool-only clients lose nothing
 - `from_db` / `to_db` are validated enums (e.g. `Gene_Name`, `Ensembl`, `RefSeq_Protein`, `ChEMBL`, `PDB`, `GeneID`, and `UniProtKB_AC-ID` as a source); an unknown database fails before any request. Target `UniProtKB-Swiss-Prot` for reviewed accessions only, or `UniProtKB` to include TrEMBL. Pair a gene-symbol `from_db` with `tax_id` to pick the species
 - Submits the job and polls within a time budget. A job still running returns `status: "running"` with a ticket; pass that ticket alone to poll it. A finished call returns `status: "finished"` with one page, and `continuation` (pass it alone) fetches the next; no `continuation` means the last page
 - `unmappedIds` lists only identifiers UniProt reports as failed. A row whose UniProtKB target is inactive (merged, demerged, or deleted) carries an `inactive` marker with the reason and replacements
+- A rejected completed-page continuation (HTTP 400), unknown page, or expired job fails `invalid_continuation` with restart guidance. Upstream outages retain their upstream error classification
 
 ---
 
@@ -88,7 +89,7 @@ All resource data is also reachable via tools — tool-only clients lose nothing
 
 - Provide exactly one of `upid` (e.g. `UP000005640`) or `taxon_id`; both or neither fails validation. Resolve an organism name to a taxon ID first with `uniprot_get_taxonomy`
 - Returns proteome type, total protein count, BUSCO completeness (score, complete/fragmented/missing counts, lineage dataset), and genome assembly accession
-- Proteins are opt-in via `include_proteins` (human has ~147,506) and come back as a capped page with a forward cursor; narrow with `query` (UniProtKB Lucene syntax). A cursor UniProt can't continue from fails `invalid_cursor`
+- Proteins are opt-in via `include_proteins` (human has ~147,506) and come back as a capped page with a forward cursor; narrow with `query` (UniProtKB Lucene syntax). Cursors bind to the resolved UPID, exact query, and tool; a taxon ID and UPID resolving to the same proteome may share a cursor, and `size` may change. Changed membership or a legacy raw cursor fails `invalid_cursor`: restart without it
 
 ---
 
