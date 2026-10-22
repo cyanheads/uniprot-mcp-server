@@ -390,7 +390,7 @@ export const getEntry = tool('uniprot_get_entry', {
       .string()
       .optional()
       .describe(
-        'Re-call guidance. On kind "outline": re-call the same accession with sections:[...] to pull specific sections. On a section window: the section_offset that pages the rest, or why the window came back empty.',
+        'Re-call guidance. On a single-record outline: re-call that accession with sections:[...] to pull specific sections. On a batch outline: re-call each outlined accession individually with accessions:[accession]. On a section window: the section_offset that pages the rest, or why the window came back empty.',
       ),
     totalCount: z
       .number()
@@ -603,6 +603,11 @@ export const getEntry = tool('uniprot_get_entry', {
       'utf8',
     );
     if (sizeBytes > INLINE_BUDGET_BYTES) {
+      ctx.log.info('Entry result exceeded the inline budget — returning outline', {
+        sizeBytes,
+        succeeded: succeeded.length,
+        failed: failed.length,
+      });
       if (entry) {
         const outlinedSections = Object.entries(entry)
           .map(([name, value]) => ({
