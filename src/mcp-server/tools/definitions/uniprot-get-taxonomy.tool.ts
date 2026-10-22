@@ -10,6 +10,7 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { markdown } from '@cyanheads/mcp-ts-core/utils';
 import type { TaxonChild, TaxonChildrenPage } from '@/services/uniprot/types.js';
 import { TAXON_CHILDREN_PAGE_SIZE } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
@@ -227,7 +228,9 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
       `**Rank:** ${t.rank}${t.mnemonic ? ` · **Mnemonic:** ${t.mnemonic}` : ''}${t.parent ? ` · **Parent:** ${t.parent.scientificName} [${t.parent.taxonId}]` : ''}`,
     ];
     if (t.otherNames?.length)
-      lines.push(`**Other names:** ${t.otherNames.slice(0, 10).join('; ')}`);
+      lines.push(
+        `**Other names:** ${t.otherNames.map((name) => markdown().inlineCode(name).build()).join('; ')}`,
+      );
     lines.push(
       `**Lineage:** ${result.lineage
         .map(

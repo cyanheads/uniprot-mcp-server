@@ -68,6 +68,33 @@ afterEach(() => {
 });
 
 describe('getTaxonomy', () => {
+  it.each([{ taxon_id: 9606 }, { name: 'Homo sapiens' }])(
+    'renders every alternative name for %j',
+    async (input) => {
+      const names = Array.from({ length: 13 }, (_, i) => `Name ${i}`);
+      names[11] = 'Name [literal] *value* _under_ `tick` <tag> & value';
+      getTaxonByIdMock.mockResolvedValue({ ...human, otherNames: names });
+      getTaxonByNameMock.mockResolvedValue({ ...human, otherNames: names });
+      const result = await runToolContract(getTaxonomy, input);
+      expect(result.structuredContent).toMatchObject({ taxon: { otherNames: names } });
+      expect(
+        contentText(result)
+          .split('\n')
+          .find((line) => line.startsWith('**Other names:**')),
+      ).toBe(
+        '**Other names:** `Name 0`; `Name 1`; `Name 2`; `Name 3`; `Name 4`; `Name 5`; `Name 6`; `Name 7`; `Name 8`; `Name 9`; `Name 10`; ``Name [literal] *value* _under_ `tick` <tag> & value``; `Name 12`',
+      );
+    },
+  );
+  it.each([undefined, []])('preserves sparse alternative names %j', async (otherNames) => {
+    getTaxonByIdMock.mockResolvedValue({ ...human, otherNames });
+    const result = await runToolContract(getTaxonomy, { taxon_id: 9606 });
+    expect(result.isError).toBeFalsy();
+    expect(
+      (result.structuredContent as { taxon: { otherNames?: string[] } }).taxon.otherNames,
+    ).toEqual(otherNames);
+    expect(contentText(result)).not.toContain('**Other names:**');
+  });
   it('bounds taxon_id to safe integers at the schema, below the ids UniProt cannot parse', async () => {
     // UniProt answers 400 only past its long range; the int schema stops far below it.
     const result = await runToolContract(getTaxonomy, { taxon_id: 1e20 });
