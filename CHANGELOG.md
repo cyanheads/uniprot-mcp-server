@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.4.0](changelog/0.4.x/0.4.0.md) — 2026-11-03
+
+Publishes the uniprot-guide skill over MCP, searches species through descendant strains, matches taxonomy names exactly, escapes plain-text search, and adds UniProtKB target identity, job totals, and failure reasons to uniprot_map_ids.
+
 ## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-10-22 · ⚠️ Breaking
 
 Complete entry rendering and query-bound pagination cursors.

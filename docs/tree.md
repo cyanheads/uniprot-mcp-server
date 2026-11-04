@@ -1,6 +1,6 @@
 # uniprot-mcp-server - Directory Structure
 
-Generated on: 2026-10-22 03:42:19
+Generated on: 2026-11-04 02:26:30
 
 ```text
 uniprot-mcp-server/
@@ -27,6 +27,7 @@ uniprot-mcp-server/
 │   ├── 0.1.x/
 │   ├── 0.2.x/
 │   ├── 0.3.x/
+│   ├── 0.4.x/
 │   └── template.md
 ├── docs/
 │   ├── design.md
@@ -39,6 +40,8 @@ uniprot-mcp-server/
 │   ├── add-resource/
 │   │   └── SKILL.md
 │   ├── add-service/
+│   │   └── SKILL.md
+│   ├── add-skill/
 │   │   └── SKILL.md
 │   ├── add-test/
 │   │   └── SKILL.md
@@ -136,6 +139,11 @@ uniprot-mcp-server/
 │   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
+├── skills/
+│   └── uniprot-guide/
+│       ├── references/
+│       │   └── query-syntax.md
+│       └── SKILL.md
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -171,7 +179,10 @@ uniprot-mcp-server/
 │   │   ├── uniprot-entry.resource.test.ts
 │   │   └── uniprot-taxonomy.resource.test.ts
 │   ├── services/
+│   │   ├── bundle-agent-docs.test.ts
 │   │   ├── query-cursor.test.ts
+│   │   ├── taxonomy-deadline.test.ts
+│   │   ├── uniprot-mapping.test.ts
 │   │   └── uniprot-service.test.ts
 │   ├── tools/
 │   │   ├── uniprot-get-entry.tool.test.ts
@@ -197,7 +208,9 @@ uniprot-mcp-server/
 ├── Dockerfile
 ├── LICENSE
 ├── manifest.json
+├── mcp.json
 ├── package.json
+├── plugin.json
 ├── README.md
 ├── server.json
 ├── tsconfig.build.json
