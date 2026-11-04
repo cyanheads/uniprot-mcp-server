@@ -19,6 +19,9 @@ import {
 } from '@/services/uniprot/types.js';
 import { getUniProtService, isCursorRejection } from '@/services/uniprot/uniprot-service.js';
 
+const LUCENE_PUNCTUATION = /[+\-!(){}[\]^"~*?:\\/&|]/g;
+const LUCENE_BOOLEAN_WORD = /(?<![\p{L}\p{N}_])(?:AND|OR|NOT)(?![\p{L}\p{N}_])/gu;
+
 const ProteinHitSchema = z
   .object({
     accession: z
@@ -105,7 +108,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .string()
       .optional()
       .describe(
-        'Plain-language search across protein names, gene names, and function, e.g. "kinase apoptosis". Provide this OR query, not both.',
+        'Plain-language search across protein names, gene names, and function, e.g. "kinase apoptosis". Punctuation and uppercase AND/OR/NOT are searched as text, with UniProt tokenization; use query for operators and field syntax. Provide this OR query, not both.',
       ),
     query: z
       .string()
@@ -117,7 +120,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .boolean()
       .default(true)
       .describe(
-        'Restrict to reviewed Swiss-Prot entries. Defaults to true (curated only). false applies no tier filter, returning reviewed and unreviewed TrEMBL entries together; for TrEMBL only, put reviewed:false in query. Ignored when query or text_search already contains a reviewed: clause.',
+        'Restrict to reviewed Swiss-Prot entries. Defaults to true (curated only). false applies no tier filter, returning reviewed and unreviewed TrEMBL entries together; for TrEMBL only, put reviewed:false in query. Ignored when query already contains a reviewed: clause; plain text never overrides this filter.',
       ),
     organism_id: z
       .number()
@@ -125,7 +128,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .positive()
       .optional()
       .describe(
-        'Restrict to an NCBI taxon ID, e.g. 9606 for human. A convenience filter ANDed onto the whole query; resolve names with uniprot_get_taxonomy.',
+        'Restrict to an NCBI taxon and its descendants, including strains and subspecies, e.g. 9606 for human or 562 for E. coli. Applies taxonomy_id to the whole query; use an explicit organism_id: clause in query for an exact taxon. Resolve names with uniprot_get_taxonomy.',
       ),
     fields: z
       .string()
@@ -204,7 +207,9 @@ export const searchProteins = tool('uniprot_search_proteins', {
     notice: z
       .string()
       .optional()
-      .describe('Guidance when nothing matched — echoes the query and suggests how to broaden.'),
+      .describe(
+        'Guidance when nothing matched, distinguishing plain text from a structured query and suggesting how to broaden.',
+      ),
   },
   errors: [
     {
@@ -222,7 +227,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
     {
       reason: 'invalid_query',
       code: JsonRpcErrorCode.InvalidParams,
-      when: 'The query or text_search has unbalanced parentheses (rejected before any request), or UniProtKB rejected the query, text_search, fields, or facets value — the message names the rejected value.',
+      when: 'The query has unbalanced parentheses (rejected before any request), or UniProtKB rejected the query, text_search, fields, or facets value — the message names the rejected value.',
       recovery:
         'Fix the field name, facet, or syntax named in the message — balance parentheses and quotes, use UniProtKB query and return field names — then retry.',
     },
@@ -245,25 +250,25 @@ export const searchProteins = tool('uniprot_search_proteins', {
       throw ctx.fail('conflicting_query');
     }
 
-    const clause = luceneQuery || textSearch;
-    const unbalanced = unbalancedParenthesis(clause);
+    const clause =
+      luceneQuery ||
+      textSearch.replace(LUCENE_PUNCTUATION, '\\$&').replace(LUCENE_BOOLEAN_WORD, '"$&"');
+    const unbalanced = luceneQuery && unbalancedParenthesis(luceneQuery);
     if (unbalanced) {
-      throw ctx.fail(
-        'invalid_query',
-        `Unbalanced parentheses in ${luceneQuery ? 'query' : 'text_search'}: ${unbalanced}.`,
-      );
+      throw ctx.fail('invalid_query', `Unbalanced parentheses in query: ${unbalanced}.`);
     }
     // reviewed: true restricts to Swiss-Prot; false adds no tier clause, so both tiers
-    // return. A reviewed: clause the caller wrote wins over either.
-    const callerPinsTier = /\breviewed:/i.test(clause);
+    // return. A reviewed: clause in the structured query wins over either.
+    const callerPinsTier = /\breviewed:/i.test(luceneQuery);
     const filters: string[] = [];
-    if (input.organism_id) filters.push(`organism_id:${input.organism_id}`);
+    if (input.organism_id) filters.push(`taxonomy_id:${input.organism_id}`);
     if (input.reviewed && !callerPinsTier) filters.push('reviewed:true');
     // UniProtKB binds AND tighter than OR, so the caller's clause is parenthesized before
     // any filter is ANDed on — unwrapped, a top-level OR takes the filters on its last
     // branch only. The balance check above keeps a stray ")" from closing this group early.
+    // Escaped text always has paired backslashes; only raw Lucene needs the trailing-escape guard.
     const effectiveQuery = filters.length
-      ? [groupClause(clause), ...filters].join(' AND ')
+      ? [luceneQuery ? groupClause(clause) : `(${clause})`, ...filters].join(' AND ')
       : clause;
     const cursor = queryCursor.decode(input.cursor, 'uniprot_search_proteins', effectiveQuery);
 
@@ -299,10 +304,12 @@ export const searchProteins = tool('uniprot_search_proteins', {
       });
     const tier = callerPinsTier ? 'from query' : input.reviewed ? 'reviewed' : 'both';
     if (page.results.length === 0 && page.inactive.length === 0) {
-      ctx.enrich.notice(
+      const guidance =
         tier === 'reviewed'
-          ? `No proteins matched "${effectiveQuery}". Broaden the terms, set reviewed: false to search both Swiss-Prot and unreviewed TrEMBL, or check field syntax.`
-          : `No proteins matched "${effectiveQuery}". Broaden the terms or check field syntax.`,
+          ? 'Broaden the terms or set reviewed: false to search both Swiss-Prot and unreviewed TrEMBL.'
+          : 'Broaden the terms.';
+      ctx.enrich.notice(
+        `No proteins matched the ${luceneQuery ? 'query' : 'plain-text search'}. ${guidance}${luceneQuery ? ' Check field syntax in query.' : ''}`,
       );
     }
 

@@ -34,7 +34,10 @@ vi.mock('@cyanheads/mcp-ts-core/utils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cyanheads/mcp-ts-core/utils')>();
   return {
     ...actual,
-    fetchWithTimeout: (...args: unknown[]) => fetchWithTimeoutMock(...args),
+    fetchWithTimeout: (...args: unknown[]) =>
+      String(args[0]).includes('/idmapping/details/')
+        ? Promise.resolve(Response.json({ to: 'PDB' }))
+        : fetchWithTimeoutMock(...args),
     // Pass-through: exercise the fetch+parse pipeline once, without retry timing.
     withRetry: (fn: () => Promise<unknown>) => fn(),
   };
@@ -145,7 +148,7 @@ describe('UniProtService — error classification', () => {
       fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: [] }));
       const err = await expectMcpError(service.getTaxonByName(name, ctx()));
       const sentUrl = new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0]));
-      expect(sentUrl.searchParams.get('query')).toBe(sent);
+      expect(sentUrl.searchParams.get('query')).toContain(`(${sent})`);
       // A name that matches nothing still fails not_found, echoing the name as given.
       expect(err.code).toBe(JsonRpcErrorCode.NotFound);
       expect(err.data).toMatchObject({ name });
@@ -358,9 +361,15 @@ describe('UniProtService — upstream-error leak prevention', () => {
     async (_case, body, call, relayed) => {
       upstreamReplies(upstreamResponse(400, body, 'Bad Request'));
       const err = await expectMcpError(call());
-      expect(err.code).toBe(JsonRpcErrorCode.InvalidParams);
+      expect(err.code).toBe(
+        _case.startsWith('mapIds')
+          ? JsonRpcErrorCode.ValidationError
+          : JsonRpcErrorCode.InvalidParams,
+      );
       expect(err.message).toBe(`UniProt rejected the request: ${relayed}`);
-      expect(err.data).toBeUndefined();
+      expect(err.data).toEqual(
+        _case.startsWith('mapIds') ? { reason: 'unsupported_db_pair' } : undefined,
+      );
       assertLeakFree(err);
       expect(err.message).not.toContain('Bad Request');
       expect((err as { cause?: unknown }).cause).toBeInstanceOf(McpError);
@@ -951,7 +960,9 @@ describe('UniProtService — ID mapping loop', () => {
     const result = await service.mapIds('Gene_Name', 'UniProtKB-Swiss-Prot', ['TP53'], 9606, ctx());
     expect(result.status).toBe('finished');
     expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(3);
-    expect(String(fetchWithTimeoutMock.mock.calls[2]?.[0])).toContain('/idmapping/results/job-303');
+    expect(String(fetchWithTimeoutMock.mock.calls[2]?.[0])).toContain(
+      '/idmapping/uniprotkb/results/job-303',
+    );
   });
 
   it('returns one completed page and a continuation without fetching the next page', async () => {
@@ -1262,7 +1273,7 @@ describe('UniProtService — ID mapping loop', () => {
       });
       const urls = fetchWithTimeoutMock.mock.calls.map(([url]) => String(url));
       expect(urls.filter((u) => u.endsWith('/idmapping/status/job-slow'))).toHaveLength(3);
-      expect(urls[4]).toContain('/idmapping/results/job-slow');
+      expect(urls[4]).toContain('/idmapping/uniprotkb/results/job-slow');
     });
 
     it('returns the resumable ticket once the budget elapses with the job still running', async () => {
@@ -1591,6 +1602,42 @@ describe('UniProtService — proteomes', () => {
     expect(sent.searchParams.get('query')).toBe('(upid:UP000005640)');
   });
 
+  it('discovers a unique descendant reference proteome only after the exact miss', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))
+      .mockResolvedValueOnce(jsonResponse({ results: [RAW_HUMAN_PROTEOME] }));
+    await expect(service.getProteome({ taxonId: 9605 }, ctx())).resolves.toMatchObject({
+      upid: 'UP000005640',
+    });
+    expect(new URL(String(fetchWithTimeoutMock.mock.calls[1]?.[0])).searchParams.get('query')).toBe(
+      '(taxonomy_id:9605) AND (reference:true)',
+    );
+  });
+
+  it('discloses incomplete descendant candidates instead of choosing the first', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { results: [RAW_HUMAN_PROTEOME] },
+          { link: '<https://rest.uniprot.org/proteomes/search?cursor=second>; rel="next"' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { results: [{ ...RAW_HUMAN_PROTEOME, id: 'UP000000002' }] },
+          { link: '<https://rest.uniprot.org/proteomes/search?cursor=third>; rel="next"' },
+        ),
+      );
+    const error = await expectMcpError(service.getProteome({ taxonId: 9605 }, ctx()));
+    expect(error.data).toMatchObject({ reason: 'ambiguous_proteome' });
+    expect(error.message).toContain('UP000005640');
+    expect(error.message).toContain('UP000000002');
+    expect(error.message).toContain('cursor=third');
+    expect(error.message).toContain('incomplete');
+    expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(3);
+  });
+
   it('lists proteome proteins with the filter grouped, the page size, the cursor, and the next cursor', async () => {
     fetchWithTimeoutMock.mockResolvedValue(
       jsonResponse(
@@ -1687,9 +1734,169 @@ describe('UniProtService — taxonomy records', () => {
     );
   });
 
-  it('getTaxonByName returns the first search match, normalized', async () => {
-    fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: [rawHuman] }));
+  it('getTaxonByName resolves an exact scientific name and returns its full record', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ results: [rawHuman] }))
+      .mockResolvedValueOnce(jsonResponse(rawHuman));
     await expect(service.getTaxonByName('Homo sapiens', ctx())).resolves.toEqual(human);
+  });
+
+  it('prefers a full common name over partial scientific names and a tied mnemonic', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          results: [
+            { taxonId: 10359, scientificName: 'Human cytomegalovirus' },
+            {
+              ...rawHuman,
+              taxonId: 741158,
+              scientificName: "Homo sapiens subsp. 'Denisova'",
+              commonName: undefined,
+            },
+            rawHuman,
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(rawHuman));
+    await expect(service.getTaxonByName('human', ctx())).resolves.toMatchObject({ taxonId: 9606 });
+  });
+
+  it('does not guess a partial scientific match', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(
+      jsonResponse({ results: [{ taxonId: 3092168, scientificName: 'SARS-CoV-2 pseudovirus' }] }),
+    );
+    await expect(service.getTaxonByName('SARS-CoV-2', ctx())).rejects.toMatchObject({
+      data: { reason: 'no_exact_match' },
+    });
+  });
+
+  it.each(['Homo sapiens', 'Home sapiens', 'Homo "sapiens', 'Homo \\sapiens'])(
+    'matches complete accepted name %j',
+    async (name) => {
+      fetchWithTimeoutMock
+        .mockResolvedValueOnce(jsonResponse({ results: [rawHuman] }))
+        .mockResolvedValueOnce(jsonResponse(rawHuman));
+      await expect(service.getTaxonByName(name, ctx())).resolves.toMatchObject({ taxonId: 9606 });
+    },
+  );
+
+  it('preserves meaningful punctuation and refuses equal best matches', async () => {
+    const denisova = {
+      ...rawHuman,
+      taxonId: 741158,
+      scientificName: "Homo sapiens subsp. 'Denisova'",
+    };
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ results: [rawHuman, denisova] }))
+      .mockResolvedValueOnce(jsonResponse(denisova));
+    await expect(service.getTaxonByName(denisova.scientificName, ctx())).resolves.toMatchObject({
+      taxonId: 741158,
+    });
+    fetchWithTimeoutMock.mockResolvedValue(
+      jsonResponse({ results: [rawHuman, { ...rawHuman, taxonId: 2 }] }),
+    );
+    await expect(service.getTaxonByName('Homo sapiens', ctx())).rejects.toMatchObject({
+      data: { reason: 'ambiguous_name' },
+    });
+  });
+
+  it('checks subsequent candidate pages before resolving and hydrates the full record', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { results: [{ taxonId: 10359, scientificName: 'Human cytomegalovirus' }] },
+          { link: '<https://rest.uniprot.org/taxonomy/search?cursor=next>; rel="next"' },
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { results: [{ taxonId: 9606, scientificName: 'Homo sapiens' }] },
+          { link: '<https://rest.uniprot.org/taxonomy/search?cursor=last>; rel="next"' },
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ results: [] }))
+      .mockResolvedValueOnce(jsonResponse(rawHuman));
+    await expect(service.getTaxonByName('Homo sapiens', ctx())).resolves.toEqual(human);
+    expect(
+      new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0])).searchParams.get('fields'),
+    ).toBe('id,scientific_name,common_name,mnemonic,other_names');
+    expect(String(fetchWithTimeoutMock.mock.calls[1]?.[0])).toContain('cursor=next');
+    expect(String(fetchWithTimeoutMock.mock.calls[2]?.[0])).toContain('cursor=last');
+    expect(String(fetchWithTimeoutMock.mock.calls[3]?.[0])).toContain('/taxonomy/9606?format=json');
+  });
+
+  it('does not resolve a first-page exact name when a tied taxon appears later', async () => {
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { results: [rawHuman] },
+          { link: '<https://rest.uniprot.org/taxonomy/search?cursor=next>; rel="next"' },
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ results: [{ ...rawHuman, taxonId: 2 }] }));
+    await expect(service.getTaxonByName('Homo sapiens', ctx())).rejects.toMatchObject({
+      data: { reason: 'ambiguous_name' },
+    });
+    expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an exact punctuation-bearing name ahead of normalization and refuses normalized ties', async () => {
+    const quoted = { ...rawHuman, taxonId: 2, scientificName: 'Homo "sapiens' };
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(jsonResponse({ results: [rawHuman, quoted] }))
+      .mockResolvedValueOnce(jsonResponse(quoted));
+    await expect(service.getTaxonByName('Homo "sapiens', ctx())).resolves.toMatchObject({
+      taxonId: 2,
+    });
+    fetchWithTimeoutMock.mockResolvedValueOnce(jsonResponse({ results: [rawHuman, quoted] }));
+    await expect(service.getTaxonByName('Homo \\sapiens', ctx())).rejects.toMatchObject({
+      data: { reason: 'ambiguous_name' },
+    });
+  });
+
+  it('passes cancellation into candidate paging and does not hydrate after cancellation', async () => {
+    const controller = new AbortController();
+    fetchWithTimeoutMock
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { results: [rawHuman] },
+          { link: '<https://rest.uniprot.org/taxonomy/search?cursor=next>; rel="next"' },
+        ),
+      )
+      .mockImplementationOnce((_url, _timeout, _context, options) => {
+        expect(options.signal.aborted).toBe(false);
+        controller.abort();
+        expect(options.signal.aborted).toBe(true);
+        expect(options.signal.reason).toBe(controller.signal.reason);
+        return Promise.reject(new DOMException('Cancelled', 'AbortError'));
+      });
+    await expect(
+      service.getTaxonByName('Homo sapiens', createMockContext({ signal: controller.signal })),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps caller-name escaping and normalization linear over a 64-fold input span', async () => {
+    const costs: number[] = [];
+    for (const length of [1_250, 5_000, 20_000, 80_000]) {
+      const name = 'a\\"\n'.repeat(Math.ceil(length / 4)).slice(0, length);
+      const samples: number[] = [];
+      for (let sample = 0; sample < 4; sample++) {
+        fetchWithTimeoutMock.mockImplementation(() =>
+          Promise.resolve(jsonResponse({ results: [{ taxonId: 1, scientificName: `${name}!` }] })),
+        );
+        const start = process.threadCpuUsage();
+        for (let iteration = 0; iteration < 8; iteration++) {
+          await expect(service.getTaxonByName(name, ctx())).rejects.toMatchObject({
+            data: { reason: 'no_exact_match' },
+          });
+        }
+        const elapsed = process.threadCpuUsage(start);
+        samples.push(elapsed.user + elapsed.system);
+      }
+      costs.push(Math.min(...samples));
+    }
+    expect(costs[3]! / Math.max(costs[0]!, 1)).toBeLessThan(256);
   });
 });
 

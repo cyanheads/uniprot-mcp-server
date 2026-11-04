@@ -34,7 +34,7 @@ import {
 const ALL_ACTIVE_JSON =
   '{"results":[{"accession":"P04637","entryName":"P53_HUMAN","proteinName":"Cellular tumor antigen p53","geneNames":["TP53"],"organism":{"scientificName":"Homo sapiens","commonName":"Human","taxonId":9606},"length":393,"reviewed":true,"annotationScore":5,"proteinExistence":"1: Evidence at protein level"}],"totalResults":1,"effectiveQuery":"gene:TP53"}';
 const ALL_ACTIVE_TEXT =
-  '## Cellular tumor antigen p53 (P04637)\n**Entry:** P53_HUMAN\nReviewed (Swiss-Prot) · Score 5/5 · 393 aa · 1: Evidence at protein level\n**Organism:** Homo sapiens (Human) [taxon 9606]\n**Genes:** TP53\n\n\nQuery: gene:TP53\n**totalResults:** 1';
+  '## Cellular tumor antigen p53 (P04637)\n**Entry:** P53_HUMAN\nReviewed (Swiss-Prot) · Score 5/5 · 393 aa · 1: Evidence at protein level\n**Organism:** Homo sapiens (Human) [taxon 9606]\n**Genes:** TP53\n\n\nQuery: `gene:TP53`\n**totalResults:** 1';
 
 const searchMock = vi.fn();
 
@@ -288,8 +288,8 @@ describe('searchProteins unbalanced parentheses (through runToolContract)', () =
       'Unbalanced parentheses in query: the ")" at character 10 closes a group that was never opened.',
     ],
     [
-      { text_search: 'kinase (apoptosis' },
-      'Unbalanced parentheses in text_search: the "(" at character 8 is never closed.',
+      { query: 'kinase (apoptosis' },
+      'Unbalanced parentheses in query: the "(" at character 8 is never closed.',
     ],
     [
       { query: '((gene:TP53) AND reviewed:false', organism_id: 9606 },
@@ -301,8 +301,8 @@ describe('searchProteins unbalanced parentheses (through runToolContract)', () =
     ],
     // Positions count characters as written, so an astral character counts once.
     [
-      { text_search: '🧬 kinase)' },
-      'Unbalanced parentheses in text_search: the ")" at character 9 closes a group that was never opened.',
+      { query: '🧬 kinase)' },
+      'Unbalanced parentheses in query: the ")" at character 9 closes a group that was never opened.',
     ],
     // Several unclosed groups: the first one opened is the one named.
     [
@@ -354,7 +354,7 @@ describe('searchProteins unbalanced parentheses (through runToolContract)', () =
     [{ query: 'gene:TP53\\' }, '(gene:TP53\\ ) AND reviewed:true'],
     [
       { text_search: 'p53\\\\\\', organism_id: 9606 },
-      '(p53\\\\\\ ) AND organism_id:9606 AND reviewed:true',
+      String.raw`(p53\\\\\\) AND taxonomy_id:9606 AND reviewed:true`,
     ],
     [{ query: 'gene:TP53\\\\' }, '(gene:TP53\\\\) AND reviewed:true'],
     // Nothing appended, nothing wrapped: the clause goes out as written, as it always did.
@@ -364,15 +364,112 @@ describe('searchProteins unbalanced parentheses (through runToolContract)', () =
     const result = await runToolContract(searchProteins, args as never);
     expect(result.isError).toBeFalsy();
     expect(searchMock.mock.calls[0]![0]).toBe(sent);
-    expect(contentText(result)).toContain(`Query: ${sent}`);
+    expect(contentText(result)).toContain(`Query: \`${sent}\``);
   });
 
-  it('leaves an unclosed quote to UniProt, which answers it with its own 400', async () => {
+  it('escapes an unclosed quote in plain text', async () => {
     searchMock.mockResolvedValue(onePage);
     const result = await runToolContract(searchProteins, { text_search: 'kinase "apoptosis' });
     expect(result.isError).toBeFalsy();
-    expect(searchMock.mock.calls[0]![0]).toBe('(kinase "apoptosis) AND reviewed:true');
+    expect(searchMock.mock.calls[0]![0]).toBe(String.raw`(kinase \"apoptosis) AND reviewed:true`);
   });
+});
+
+describe('searchProteins literal text and descendant scope', () => {
+  it.each([
+    ['kinase apoptosis', '(kinase apoptosis) AND reviewed:true'],
+    ['IL-6 receptor: signaling', String.raw`(IL\-6 receptor\: signaling) AND reviewed:true`],
+    [
+      'ATP synthase [mitochondrial]',
+      String.raw`(ATP synthase \[mitochondrial\]) AND reviewed:true`,
+    ],
+    ['kinase ~ apoptosis^2', String.raw`(kinase \~ apoptosis\^2) AND reviewed:true`],
+    ['kinase (apoptosis', String.raw`(kinase \(apoptosis) AND reviewed:true`],
+    ['🧬 kinase)', String.raw`(🧬 kinase\)) AND reviewed:true`],
+    ['p53* + kinase?', String.raw`(p53\* \+ kinase\?) AND reviewed:true`],
+    [
+      'kinase AND NOT apoptosis OR TP53',
+      '(kinase "AND" "NOT" apoptosis "OR" TP53) AND reviewed:true',
+    ],
+    ['βNOT NOTCH1 ORF1', '(βNOT NOTCH1 ORF1) AND reviewed:true'],
+    ['reviewed:false', String.raw`(reviewed\:false) AND reviewed:true`],
+    ['a && b || !c / d {e}', String.raw`(a \&\& b \|\| \!c \/ d \{e\}) AND reviewed:true`],
+  ])('sends plain text %j as words rather than query syntax', async (text_search, expected) => {
+    searchMock.mockResolvedValue(onePage);
+    const result = await runToolContract(searchProteins, { text_search });
+    expect(result.isError).toBeFalsy();
+    expect(searchMock.mock.calls[0]![0]).toBe(expected);
+    expect(result.structuredContent).toMatchObject({ effectiveQuery: expected });
+    expect(contentText(result)).toContain(expected);
+  });
+
+  it('keeps explicit exact-node Lucene filters alongside descendant convenience scope', async () => {
+    searchMock.mockResolvedValue(onePage);
+    const result = await runToolContract(searchProteins, {
+      query: 'gene_exact:gyrA AND organism_id:83333',
+      organism_id: 562,
+    });
+    expect(result.structuredContent).toMatchObject({
+      effectiveQuery:
+        '(gene_exact:gyrA AND organism_id:83333) AND taxonomy_id:562 AND reviewed:true',
+    });
+    expect(searchMock.mock.calls[0]![0]).toBe(
+      '(gene_exact:gyrA AND organism_id:83333) AND taxonomy_id:562 AND reviewed:true',
+    );
+  });
+
+  it('rejects a saved exact-node convenience cursor instead of applying it to descendants', async () => {
+    const cursor = queryCursor.encode(
+      'NEXT',
+      'uniprot_search_proteins',
+      '(gene:TP53) AND organism_id:9606 AND reviewed:true',
+    );
+    const result = await runToolContract(searchProteins, {
+      query: 'gene:TP53',
+      organism_id: 9606,
+      cursor,
+    });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_cursor' });
+    expect(contentText(result)).toContain('no cursor');
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not offer field syntax as a remedy for literal text with no matches', async () => {
+    searchMock.mockResolvedValue({ results: [], inactive: [], totalResults: 0 });
+    const result = await runToolContract(searchProteins, { text_search: 'kinase ~ nothing' });
+    expect(result.isError).toBeFalsy();
+    const notice = (result.structuredContent as { notice: string }).notice;
+    expect(notice).toContain('No proteins matched');
+    expect(notice).toContain('reviewed: false');
+    expect(notice).not.toContain('field syntax');
+    expect(contentText(result)).toContain(notice);
+  });
+
+  it.each(['NOT ( [ ', '  \r\n', '\\', '§1 x'])(
+    'assembles long plain text with bounded CPU growth: %j',
+    async (unit) => {
+      searchMock.mockResolvedValue(onePage);
+      const context = createMockContext({ errors: searchProteins.errors });
+      const samples: number[] = [];
+      for (const size of [5_000, 20_000, 80_000, 320_000]) {
+        const text = `${unit.repeat(Math.ceil(size / unit.length)).slice(0, size)}\ny`;
+        const input = searchProteins.input.parse({ text_search: text });
+        const measurements: number[] = [];
+        for (let repeat = 0; repeat < 5; repeat++) {
+          searchMock.mockClear();
+          const start = process.threadCpuUsage();
+          await searchProteins.handler(input, context);
+          const elapsed = process.threadCpuUsage(start);
+          measurements.push(elapsed.user + elapsed.system);
+        }
+        const cpuUs = Math.min(...measurements);
+        samples.push(cpuUs);
+        expect(cpuUs).toBeLessThan(500_000);
+        if (samples.length > 1) expect(cpuUs / samples[0]!).toBeLessThan(256);
+      }
+      expect(searchMock).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 describe('searchProteins handler', () => {
@@ -387,7 +484,7 @@ describe('searchProteins handler', () => {
     const result = await searchProteins.handler(input, ctx);
     const sentQuery = searchMock.mock.calls[0]![0] as string;
     expect(sentQuery).toContain('kinase apoptosis');
-    expect(sentQuery).toContain('organism_id:9606');
+    expect(sentQuery).toContain('taxonomy_id:9606');
     expect(sentQuery).toContain('reviewed:true');
     expect(getEnrichment(ctx)).toMatchObject({
       effectiveQuery: sentQuery,
@@ -402,25 +499,25 @@ describe('searchProteins handler', () => {
     [{ text_search: 'kinase', reviewed: false }, 'kinase'],
     [
       { query: 'gene:TP53', organism_id: 9606, reviewed: false },
-      '(gene:TP53) AND organism_id:9606',
+      '(gene:TP53) AND taxonomy_id:9606',
     ],
     // A caller-pinned reviewed clause stays; nothing is appended, so it is sent unwrapped.
     [{ query: 'gene:TP53 AND reviewed:false' }, 'gene:TP53 AND reviewed:false'],
     // ...but it is wrapped when organism_id is still appended.
     [
       { query: 'gene:TP53 OR reviewed:false', organism_id: 9606 },
-      '(gene:TP53 OR reviewed:false) AND organism_id:9606',
+      '(gene:TP53 OR reviewed:false) AND taxonomy_id:9606',
     ],
     // UniProtKB binds AND tighter than OR: unwrapped, reviewed:true would apply to the
     // last branch only and TrEMBL hits would leak in through the first.
     [{ query: 'gene:TP53 OR gene:MDM2' }, '(gene:TP53 OR gene:MDM2) AND reviewed:true'],
     [
       { query: 'gene:TP53 OR gene:MDM2', organism_id: 9606 },
-      '(gene:TP53 OR gene:MDM2) AND organism_id:9606 AND reviewed:true',
+      '(gene:TP53 OR gene:MDM2) AND taxonomy_id:9606 AND reviewed:true',
     ],
     [
       { text_search: 'insulin OR glucagon', organism_id: 9606 },
-      '(insulin OR glucagon) AND organism_id:9606 AND reviewed:true',
+      '(insulin "OR" glucagon) AND taxonomy_id:9606 AND reviewed:true',
     ],
     // Wrapping is unconditional whenever a filter is appended, single terms included.
     [{ query: 'gene:TP53' }, '(gene:TP53) AND reviewed:true'],
@@ -438,7 +535,7 @@ describe('searchProteins handler', () => {
       query: 'gene:TP53 OR gene:MDM2',
       organism_id: 9606,
     });
-    const wrapped = '(gene:TP53 OR gene:MDM2) AND organism_id:9606 AND reviewed:true';
+    const wrapped = '(gene:TP53 OR gene:MDM2) AND taxonomy_id:9606 AND reviewed:true';
     expect((result.structuredContent as { effectiveQuery?: string }).effectiveQuery).toBe(wrapped);
     expect(contentText(result)).toContain(wrapped);
   });
@@ -488,10 +585,10 @@ describe('searchProteins handler', () => {
       queryCursor.decode(
         effective.cursor,
         'uniprot_search_proteins',
-        '(kinase) AND organism_id:9606 AND reviewed:true',
+        '(kinase) AND taxonomy_id:9606 AND reviewed:true',
       ),
     ).toBe('NEXT');
-    expect(effective.effectiveQuery).toContain('organism_id:9606');
+    expect(effective.effectiveQuery).toContain('taxonomy_id:9606');
   });
 
   it('emits a broaden-the-search notice on zero results', async () => {
@@ -522,7 +619,7 @@ describe('searchProteins handler', () => {
 
     await searchProteins.handler(input, ctx);
     const notice = getEnrichment(ctx).notice as string;
-    expect(notice).toContain('No proteins matched "zzzznotarealquery"');
+    expect(notice).toContain('No proteins matched the plain-text search.');
     expect(notice).not.toContain('reviewed: false');
   });
 
@@ -585,7 +682,7 @@ describe('searchProteins upstream rejection (through runToolContract)', () => {
   it.each([
     ['query field', UNIPROT_400_BODIES.badQueryField, { query: 'badfield:abc' }],
     // An unclosed quote passes the local parenthesis check and reaches UniProt's own 400.
-    ['text_search syntax', UNIPROT_400_BODIES.invalidSyntax, { text_search: 'kinase "apoptosis' }],
+    ['query syntax', UNIPROT_400_BODIES.invalidSyntax, { query: 'kinase "apoptosis' }],
     [
       'fields value',
       UNIPROT_400_BODIES.badFields,
@@ -612,7 +709,7 @@ describe('searchProteins upstream rejection (through runToolContract)', () => {
       const hint = (envelope.data?.recovery as { hint?: string } | undefined)?.hint;
       expect(hint).toContain('named in the message');
       const text = contentText(result);
-      expect(text).toContain(relayed);
+      expect(text).toContain(relayed.replaceAll('[', '\\[').replaceAll(']', '\\]'));
       expect(text).toContain(`Recovery: ${hint}`);
       expect(text).toContain('(reason invalid_query');
       // Nothing else from the upstream body or HTTP layer reaches either surface.

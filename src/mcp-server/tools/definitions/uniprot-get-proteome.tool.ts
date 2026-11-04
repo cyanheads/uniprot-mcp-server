@@ -68,7 +68,7 @@ export const getProteome = tool('uniprot_get_proteome', {
       .positive()
       .optional()
       .describe(
-        'NCBI taxon ID, e.g. 9606 for human. Resolves to the reference proteome. Provide this OR upid, not both.',
+        'NCBI taxon ID, e.g. 9606 for human. Prefers an exact reference proteome; otherwise resolves a unique descendant reference, or returns candidate UPIDs and taxon IDs for explicit selection. Provide this OR upid, not both.',
       ),
     include_proteins: z
       .boolean()
@@ -148,6 +148,7 @@ export const getProteome = tool('uniprot_get_proteome', {
       ),
   }),
   enrichment: {
+    query: z.string().optional().describe('The protein filter as supplied by the caller.'),
     truncated: z
       .boolean()
       .optional()
@@ -170,6 +171,14 @@ export const getProteome = tool('uniprot_get_proteome', {
       ),
   },
   errors: [
+    {
+      reason: 'ambiguous_proteome',
+      code: JsonRpcErrorCode.InvalidParams,
+      thrownBy: 'service',
+      when: 'Multiple descendant reference proteomes exist or candidate pages remain.',
+      recovery:
+        'Choose an explicit upid from the candidate names and taxon IDs in the message, or retrieve its next-page link.',
+    },
     {
       reason: 'missing_identifier',
       code: JsonRpcErrorCode.ValidationError,
@@ -266,6 +275,11 @@ export const getProteome = tool('uniprot_get_proteome', {
     }
 
     ctx.enrich({ totalProteinsMatched: page.totalResults });
+    if (input.query) ctx.enrich({ query: input.query });
+    if (!page.proteins.length)
+      ctx.enrich.notice(
+        `No proteins matched${input.query ? ` the filter "${input.query}"` : ' this proteome page'}.`,
+      );
     if (page.cursor) {
       ctx.enrich.truncated({
         shown: page.proteins.length,

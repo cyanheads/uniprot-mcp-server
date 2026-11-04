@@ -27,7 +27,7 @@ const LineageEntrySchema = z
 export const getTaxonomy = tool('uniprot_get_taxonomy', {
   title: 'uniprot-mcp-server: get taxonomy',
   description:
-    'Resolve a taxonomy record by NCBI taxon ID (e.g. 9606) or scientific name (e.g. "Homo sapiens") — provide exactly one. Returns the scientific and common name, mnemonic, rank, parent, and the full lineage. Set include_children to also fetch immediate child taxa (a separate lookup — not inline on the record) in pages of 100 with the total child count; when more remain, pass the returned cursor to fetch the next page. Use this to turn an organism name into the taxon ID that uniprot_search_proteins (organism_id) and uniprot_get_proteome (taxon_id) expect.',
+    'Resolve a taxonomy record by NCBI taxon ID (e.g. 9606) or organism name (e.g. "Homo sapiens" or "human") — provide exactly one. Exact case-insensitive scientific names take priority, then common names, mnemonic and aliases; stray double quotes and backslashes are tolerated after exact matching. Ties and partial matches return candidate taxon IDs instead of guessing. Returns the scientific and common name, mnemonic, rank, parent, and full lineage. Set include_children for immediate child taxa in pages of 100; pass the returned cursor for the next page. Use the resolved taxon ID with uniprot_search_proteins (organism_id) or uniprot_get_proteome (taxon_id).',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     taxon_id: z
@@ -40,7 +40,7 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
       .string()
       .optional()
       .describe(
-        'Organism scientific name, e.g. "Homo sapiens". Provide this OR taxon_id, not both. Matched against the scientific name.',
+        'Organism name, e.g. "Homo sapiens" or "human". Exact case-insensitive scientific names take priority, then common names, mnemonic and aliases. Stray double quotes and backslashes are tolerated only after exact matching; ties require taxon_id. Provide this OR taxon_id, not both.',
       ),
     include_children: z
       .boolean()
@@ -125,6 +125,28 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
   },
   errors: [
     {
+      reason: 'incomplete_candidates',
+      code: JsonRpcErrorCode.Timeout,
+      thrownBy: 'service',
+      when: 'The 45-second name lookup budget expires before all candidate pages are checked.',
+      recovery:
+        'Use a candidate taxon_id, narrow the name, or follow the candidate-search URL in the message.',
+    },
+    {
+      reason: 'ambiguous_name',
+      code: JsonRpcErrorCode.InvalidParams,
+      thrownBy: 'service',
+      when: 'Multiple taxa share the best exact name match.',
+      recovery: 'Choose an explicit taxon_id from the candidates in the message.',
+    },
+    {
+      reason: 'no_exact_match',
+      code: JsonRpcErrorCode.NotFound,
+      thrownBy: 'service',
+      when: 'Only partial candidate names match.',
+      recovery: 'Check the full name or choose a candidate taxon_id from the message.',
+    },
+    {
       reason: 'missing_identifier',
       code: JsonRpcErrorCode.ValidationError,
       when: 'Neither taxon_id nor name was provided.',
@@ -170,7 +192,7 @@ export const getTaxonomy = tool('uniprot_get_taxonomy', {
           ? await service.getTaxonById(target.taxonId, ctx)
           : await service.getTaxonByName(target.name, ctx);
     } catch (err) {
-      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
+      if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound && !err.data?.reason) {
         throw ctx.fail('not_found', err.message);
       }
       throw err;

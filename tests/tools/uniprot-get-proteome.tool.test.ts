@@ -80,6 +80,44 @@ afterEach(() => {
 });
 
 describe('getProteome', () => {
+  it('echoes an empty protein filter and no-match notice on both surfaces', async () => {
+    getProteomeMock.mockResolvedValue(humanProteome);
+    getProteomeProteinsMock.mockResolvedValue({ proteins: [], totalResults: 0 });
+    const result = await runToolContract(getProteome, {
+      taxon_id: 9606,
+      include_proteins: true,
+      query: 'gene:ZZZNOTAGENE',
+    });
+    expect(result.structuredContent).toMatchObject({
+      proteins: [],
+      query: 'gene:ZZZNOTAGENE',
+      notice: 'No proteins matched the filter "gene:ZZZNOTAGENE".',
+    });
+    expect(contentText(result)).toContain('gene:ZZZNOTAGENE');
+    expect(contentText(result)).toContain('No proteins matched');
+  });
+
+  it('renders descendant UPID and taxon guidance with ambiguity recovery on both surfaces', async () => {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) => {
+        const exact = url.searchParams.get('query')?.includes('organism_id:');
+        return upstreamResponse(200, {
+          results: exact ? [] : [RAW_HUMAN_PROTEOME, { ...RAW_HUMAN_PROTEOME, id: 'UP000000002' }],
+        });
+      }),
+    );
+    getProteomeMock.mockImplementation(realService.getProteome.bind(realService));
+    const result = await runToolContract(getProteome, { taxon_id: 9605 });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'ambiguous_proteome' });
+    for (const surface of [errorEnvelope(result).message, contentText(result)]) {
+      expect(surface).toContain('UP000005640');
+      expect(surface).toContain('UP000000002');
+      expect(surface).toContain('9606');
+      expect(surface).toContain('Homo sapiens');
+    }
+    expect(contentText(result)).toContain('Recovery:');
+  });
   it('continues across resolved identifier aliases and page sizes, rejecting another proteome or query before paging', async () => {
     getProteomeMock.mockResolvedValue(humanProteome);
     const fetchStub = routeUpstream((url) => {

@@ -537,7 +537,7 @@ export class UniProtService {
       if (ctx.signal.aborted) break;
       const status = await this.mappingStatus(jobId, ctx);
       if (status === 'FINISHED') {
-        return { status: 'finished', ...(await this.mappingResults(jobId, ctx)) };
+        return { status: 'finished', ...(await this.mappingResults(jobId, ctx, undefined, to)) };
       }
       await new Promise((r) => setTimeout(r, 500));
     }
@@ -594,7 +594,27 @@ export class UniProtService {
       const text = await response.text();
       this.guardHtml(text);
       return { data: JSON.parse(text) as { jobId?: string; messages?: string[] } };
-    }).catch((err) => sanitizeUpstreamError(err, 'uniprot.runMapping'));
+    }).catch((err) => {
+      if (
+        !ctx.signal.aborted &&
+        err instanceof McpError &&
+        err.code === JsonRpcErrorCode.InvalidParams
+      ) {
+        const raw = err.data;
+        const message = upstreamRejectionMessage(raw?.body ?? raw?.responseBody);
+        if (
+          message.includes(`The combination of 'from=${from}' and 'to=${to}' parameters is invalid`)
+        ) {
+          throw new McpError(
+            JsonRpcErrorCode.ValidationError,
+            message,
+            { reason: 'unsupported_db_pair' },
+            { cause: err },
+          );
+        }
+      }
+      return sanitizeUpstreamError(err, 'uniprot.runMapping');
+    });
 
     if (!data.jobId) {
       throw serviceUnavailable(
@@ -621,13 +641,27 @@ export class UniProtService {
         );
         const text = await response.text();
         this.guardHtml(text);
-        const data = JSON.parse(text) as { jobStatus?: string };
+        const data = JSON.parse(text) as { jobStatus?: string; errors?: { message?: string }[] };
+        if (data.jobStatus === 'ERROR') throw mappingFailure(data);
         return data.jobStatus ?? 'RUNNING';
       } catch (err) {
+        if (ctx.signal.aborted) throw err;
+        if (err instanceof McpError && err.data) {
+          const raw = err.data;
+          const body = raw.body ?? raw.responseBody;
+          if (typeof body === 'string') {
+            let parsed: { jobStatus?: string; errors?: { message?: string }[] } | undefined;
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              /* Non-JSON failures retain HTTP classification. */
+            }
+            if (parsed?.jobStatus === 'ERROR') throw mappingFailure(parsed, err);
+          }
+        }
         const status =
           err instanceof McpError && err.data
-            ? ((err.data as Record<string, unknown>).status ??
-              (err.data as Record<string, unknown>).statusCode)
+            ? (err.data.status ?? err.data.statusCode)
             : undefined;
         if (status === 303) return 'FINISHED';
         return sanitizeUpstreamError(err, operation);
@@ -639,35 +673,82 @@ export class UniProtService {
     jobId: string,
     ctx: Context,
     cursor?: string,
+    target?: string,
   ): Promise<IdMappingPage> {
-    const url = new URL(`${this.baseUrl}/idmapping/results/${jobId}`);
+    // Old tickets carry no target database. Metadata is optional: never strand a usable job.
+    const optionalCtx = {
+      ...ctx,
+      signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(2_000)]),
+    };
+    if (target === undefined) {
+      try {
+        const metadata = await this.optionalMappingJson<{ to?: string }>(
+          `${this.baseUrl}/idmapping/details/${jobId}`,
+          'uniprot.mappingDetails',
+          optionalCtx,
+        );
+        target = metadata.data.to;
+      } catch (err) {
+        if (ctx.signal.aborted || !mappingEnrichmentUnavailable(err, optionalCtx.signal.aborted))
+          throw err;
+      }
+    }
+    const enriched = target === 'UniProtKB' || target === 'UniProtKB-Swiss-Prot';
+    const url = new URL(
+      `${this.baseUrl}/idmapping/${enriched ? 'uniprotkb/' : ''}results/${jobId}`,
+    );
     url.searchParams.set('format', 'json');
     url.searchParams.set('size', '500');
+    if (enriched) url.searchParams.set('fields', 'accession,id,reviewed,organism_id,gene_primary');
     if (cursor) url.searchParams.set('cursor', cursor);
 
-    const { data, response } = await this.getJson<RawMappingResults>(
-      url.toString(),
-      'uniprot.mappingResults',
-      ctx,
-    );
+    let page: { data: RawMappingResults; response: Response };
+    let identityUnavailable = target === undefined;
+    try {
+      page = enriched
+        ? await this.optionalMappingJson<RawMappingResults>(
+            url.toString(),
+            'uniprot.mappingResults',
+            optionalCtx,
+          )
+        : await this.getJson<RawMappingResults>(url.toString(), 'uniprot.mappingResults', ctx);
+    } catch (err) {
+      if (
+        !enriched ||
+        ctx.signal.aborted ||
+        !mappingEnrichmentUnavailable(err, optionalCtx.signal.aborted)
+      )
+        throw err;
+      identityUnavailable = true;
+      url.pathname = new URL(`${this.baseUrl}/idmapping/results/${jobId}`).pathname;
+      url.searchParams.delete('fields');
+      page = await this.getJson<RawMappingResults>(url.toString(), 'uniprot.mappingResults', ctx);
+    }
+    const { data, response } = page;
     let results: IdMappingPage['results'] = (data.results ?? []).map((row) => ({
       from: row.from,
       to: targetAccession(row.to),
+      ...(typeof row.to === 'string' ? {} : mappingIdentity(row.to)),
     }));
 
     // This endpoint names target accessions only. UniProt flags a job holding any
     // inactive UniProtKB target with a job-wide obsoleteCount, and only the uniprotkb
     // results endpoint says which — so only such a job pays one more read per page.
     let inactiveUnchecked: number | undefined;
-    if (data.obsoleteCount && results.length) {
+    if (data.obsoleteCount && results.length && (!enriched || identityUnavailable)) {
       try {
-        const inactive = await this.inactiveMappingTargets(jobId, cursor, results, ctx);
+        const inactive = await this.inactiveMappingTargets(jobId, cursor, results, optionalCtx);
         results = results.map((r) => {
           const reason = inactive.get(mappingKey(r.from, r.to));
           return reason ? { ...r, inactive: reason } : r;
         });
       } catch (err) {
-        if (ctx.signal.aborted) throw err;
+        if (
+          ctx.signal.aborted ||
+          (!mappingEnrichmentUnavailable(err, optionalCtx.signal.aborted) &&
+            !(err instanceof MappingPageMismatch))
+        )
+          throw err;
         ctx.log.warning('Inactive ID-mapping target lookup failed', { jobId });
         inactiveUnchecked = data.obsoleteCount;
       }
@@ -686,9 +767,31 @@ export class UniProtService {
     return {
       results,
       failedIds: data.failedIds ?? [],
+      ...(response.headers.has('x-total-results')
+        ? { totalMappings: Number(response.headers.get('x-total-results')) }
+        : {}),
+      ...(identityUnavailable ? { identityUnavailable } : {}),
       ...(continuation ? { continuation } : {}),
       ...(inactiveUnchecked ? { inactiveUnchecked } : {}),
     };
+  }
+
+  /** Best-effort metadata and identity reads get one bounded attempt; malformed JSON is not retried. */
+  private async optionalMappingJson<T>(
+    url: string,
+    operation: string,
+    ctx: Context,
+  ): Promise<{ data: T; response: Response }> {
+    try {
+      const response = await fetchWithTimeout(url, this.timeoutMs, this.reqCtx(operation, ctx), {
+        signal: ctx.signal,
+      });
+      const text = await response.text();
+      this.guardHtml(text);
+      return { data: JSON.parse(text) as T, response };
+    } catch (err) {
+      return sanitizeUpstreamError(err, operation);
+    }
   }
 
   /**
@@ -728,7 +831,9 @@ export class UniProtService {
       }
     }
     if (page.some((r) => !reread.has(mappingKey(r.from, r.to)))) {
-      throw new Error(`ID-mapping job ${jobId}: the uniprotkb results page holds different rows.`);
+      throw new MappingPageMismatch(
+        `ID-mapping job ${jobId}: the uniprotkb results page holds different rows.`,
+      );
     }
     return inactive;
   }
@@ -767,7 +872,42 @@ export class UniProtService {
       'uniprot.getProteome',
       ctx,
     );
-    const raw = data.results?.[0];
+    let raw = data.results?.[0];
+    if (!raw && !idOrTaxon.upid) {
+      url.searchParams.set('query', `(taxonomy_id:${idOrTaxon.taxonId}) AND (reference:true)`);
+      url.searchParams.set('size', '5');
+      const descendantPage = await this.getJson<{ results?: RawProteome[] }>(
+        url.toString(),
+        'uniprot.getProteome',
+        ctx,
+      );
+      const candidates = descendantPage.data.results ?? [];
+      let nextPage = this.parseNextLink(descendantPage.response);
+      // A sparse first page cannot establish uniqueness while another page exists.
+      if (candidates.length < 2 && nextPage) {
+        const next = await this.getJson<{ results?: RawProteome[] }>(
+          nextPage,
+          'uniprot.getProteome',
+          ctx,
+        );
+        candidates.push(...(next.data.results ?? []));
+        nextPage = this.parseNextLink(next.response);
+      }
+      if (candidates.length > 1 || nextPage) {
+        const guidance = candidates
+          .map((candidate) => {
+            const proteome = normalizeProteome(candidate);
+            return `${proteome.upid}: taxon ${proteome.organism.taxonId}, ${proteome.organism.scientificName}`;
+          })
+          .join('; ');
+        throw new McpError(
+          JsonRpcErrorCode.InvalidParams,
+          `No exact reference proteome exists for taxon ${idOrTaxon.taxonId}; choose an explicit upid from descendant candidates: ${guidance}.${nextPage ? ` This suggestion list is incomplete; retrieve the next page: ${nextPage}. Narrow taxon_id or choose a listed upid.` : ''}`,
+          { reason: 'ambiguous_proteome', taxonId: idOrTaxon.taxonId },
+        );
+      }
+      raw = candidates[0];
+    }
     if (!raw) {
       const label = idOrTaxon.upid ?? `taxon ${idOrTaxon.taxonId}`;
       throw notFound(`No reference proteome found for ${label}.`, { ...idOrTaxon });
@@ -825,24 +965,89 @@ export class UniProtService {
   }
 
   /**
-   * Resolve a taxonomy record by scientific name via the taxonomy search endpoint.
+   * Resolve a full scientific/common name, mnemonic or alias across candidate pages.
    * The name is a plain name, not query syntax: `\` and `"` are escaped so any
-   * name forms a valid phrase query. UniProt tokenizes the phrase, so a stray
-   * quote or backslash in a name does not by itself prevent a match.
+   * name forms a valid phrase query. Compact candidates establish uniqueness
+   * before fetching the selected full record, including its lineage.
    */
   async getTaxonByName(name: string, ctx: Context): Promise<Taxon> {
     const url = new URL(`${this.baseUrl}/taxonomy/search`);
-    url.searchParams.set('query', `scientific:"${name.replace(/[\\"]/g, '\\$&')}"`);
-    url.searchParams.set('format', 'json');
-    url.searchParams.set('size', '1');
-    const { data } = await this.getJson<{ results?: RawTaxon[] }>(
-      url.toString(),
-      'uniprot.getTaxonByName',
-      ctx,
+    const phrase = `"${name.replace(/[\\"]/g, '\\$&')}"`;
+    url.searchParams.set(
+      'query',
+      `(scientific:${phrase}) OR (common:${phrase}) OR (mnemonic:${phrase}) OR (${phrase})`,
     );
-    const raw = data.results?.[0];
-    if (!raw) throw notFound(`No taxonomy record matched the name "${name}".`, { name });
-    return normalizeTaxon(raw);
+    url.searchParams.set('format', 'json');
+    url.searchParams.set('size', '500');
+    url.searchParams.set('fields', 'id,scientific_name,common_name,mnemonic,other_names');
+    const deadline = AbortSignal.timeout(45_000);
+    const lookupCtx = { ...ctx, signal: AbortSignal.any([ctx.signal, deadline]) };
+    const rows: RawTaxon[] = [];
+    let lastPage: RawTaxon[] = [];
+    let nextPage: string | undefined = url.toString();
+    try {
+      while (nextPage) {
+        const page = await this.getJson<{ results?: RawTaxon[] }>(
+          nextPage,
+          'uniprot.getTaxonByName',
+          lookupCtx,
+        );
+        lastPage = page.data.results ?? [];
+        rows.push(...lastPage);
+        nextPage = this.parseNextLink(page.response);
+      }
+    } catch (err) {
+      if (ctx.signal.aborted || !deadline.aborted) throw err;
+      const suggestions = lastPage
+        .map((taxon) => `${taxon.taxonId}: ${taxon.scientificName}`)
+        .join('; ');
+      throw new McpError(
+        JsonRpcErrorCode.Timeout,
+        `Taxonomy name matching exceeded its 45-second lookup budget before all candidates were checked. Narrow the name or use taxon_id.${suggestions ? ` Incomplete suggestions from the last completed page: ${suggestions}.` : ''} Continue the candidate search at ${nextPage}.`,
+        { reason: 'incomplete_candidates', name },
+        { cause: err },
+      );
+    }
+    const candidates = [...new Map(rows.map((taxon) => [taxon.taxonId, taxon])).values()];
+    const exact = (value: string) => value.trim().toLowerCase();
+    // Only stray double quotes and backslashes are tolerated; apostrophes,
+    // hyphens, digits and other meaningful scientific-name punctuation survive.
+    const tolerant = (value: string) => exact(value.replace(/[\\"]/g, '').replace(/\s+/g, ' '));
+    for (const normalize of [exact, tolerant]) {
+      const normalizedName = normalize(name);
+      for (const names of [
+        (taxon: RawTaxon) => [taxon.scientificName],
+        (taxon: RawTaxon) => (taxon.commonName ? [taxon.commonName] : []),
+        (taxon: RawTaxon) => (taxon.mnemonic ? [taxon.mnemonic] : []),
+        (taxon: RawTaxon) => taxon.otherNames ?? [],
+      ]) {
+        const matches = candidates.filter((taxon) =>
+          names(taxon).some((value) => normalize(value) === normalizedName),
+        );
+        const [match] = matches;
+        if (match && matches.length === 1) return this.getTaxonById(match.taxonId, lookupCtx);
+        if (matches.length > 1) {
+          const guidance = matches
+            .map((taxon) => `${taxon.taxonId}: ${taxon.scientificName}`)
+            .join('; ');
+          throw new McpError(
+            JsonRpcErrorCode.InvalidParams,
+            `Ambiguous taxonomy name "${name}". Choose taxon_id: ${guidance}.`,
+            { reason: 'ambiguous_name', name },
+          );
+        }
+      }
+    }
+    const suggestions = candidates
+      .map((taxon) => `${taxon.taxonId}: ${taxon.scientificName}`)
+      .join('; ');
+    if (!candidates.length)
+      throw notFound(`No taxonomy record matched the name "${name}".`, { name });
+    throw new McpError(
+      JsonRpcErrorCode.NotFound,
+      `No exact taxonomy name matched "${name}". Suggestions (use taxon_id): ${suggestions}.`,
+      { reason: 'no_exact_match', name },
+    );
   }
 
   /**
@@ -1233,7 +1438,7 @@ type RawTaxon = {
 };
 
 type RawMappingResults = {
-  results?: { from: string; to: string | RawInactiveFields }[];
+  results?: { from: string; to: string | (RawInactiveFields & Partial<RawEntry>) }[];
   /** Job-wide count of inactive UniProtKB targets; absent when there are none. */
   obsoleteCount?: number;
   failedIds?: string[];
@@ -1247,6 +1452,84 @@ function targetAccession(to: string | RawInactiveFields): string {
 /** Key of one ID-mapping row, matching the generic and uniprotkb results pages. */
 function mappingKey(from: string, to: string): string {
   return `${from}\n${to}`;
+}
+
+/** A different optional page is unavailable enrichment, not a usable identity match. */
+class MappingPageMismatch extends Error {}
+
+/** Optional upstream reads degrade only for operational or endpoint availability failures. */
+function mappingEnrichmentUnavailable(err: unknown, deadlineExpired: boolean): boolean {
+  if (
+    deadlineExpired &&
+    err instanceof Error &&
+    (err.name === 'TimeoutError' || err.name === 'AbortError')
+  )
+    return true;
+  return (
+    err instanceof McpError &&
+    ([
+      JsonRpcErrorCode.ServiceUnavailable,
+      JsonRpcErrorCode.Timeout,
+      JsonRpcErrorCode.NotFound,
+      JsonRpcErrorCode.Forbidden,
+      JsonRpcErrorCode.Unauthorized,
+      JsonRpcErrorCode.ValidationError,
+      JsonRpcErrorCode.RateLimited,
+      JsonRpcErrorCode.InvalidParams,
+      JsonRpcErrorCode.InvalidRequest,
+    ].includes(err.code) ||
+      (deadlineExpired && err.code === JsonRpcErrorCode.RequestCancelled))
+  );
+}
+
+/** Identity fields are sparse and inactive stubs retain their recovery pointers. */
+function mappingIdentity(
+  raw: RawInactiveFields & Partial<RawEntry>,
+): Partial<IdMappingPage['results'][number]> {
+  const stub = parseInactive(raw);
+  const { accession: _accession, ...inactive } = stub ?? {};
+  return {
+    ...(stub ? { inactive } : {}),
+    ...(raw.uniProtkbId ? { entryName: raw.uniProtkbId } : {}),
+    ...(raw.entryType?.includes('Swiss-Prot')
+      ? { reviewed: true }
+      : raw.entryType?.includes('TrEMBL')
+        ? { reviewed: false }
+        : {}),
+    ...(raw.organism
+      ? {
+          organism: {
+            taxonId: raw.organism.taxonId,
+            ...(raw.organism.scientificName ? { scientificName: raw.organism.scientificName } : {}),
+          },
+        }
+      : {}),
+    ...(raw.genes?.[0]?.geneName?.value ? { gene: raw.genes[0].geneName.value } : {}),
+  };
+}
+
+/** A terminal job failure is actionable input feedback, never an outage to retry. */
+function mappingFailure(data: { errors?: { message?: string }[] }, cause?: unknown): McpError {
+  const messages = (data.errors ?? [])
+    .flatMap((error) => (typeof error.message === 'string' ? [boundMessage(error.message)] : []))
+    .filter((message): message is string => Boolean(message))
+    .slice(0, MAX_RELAYED_MESSAGES);
+  const limit = messages.some((message) => message.includes('number of mapped IDs'));
+  return new McpError(
+    JsonRpcErrorCode.ValidationError,
+    messages.length
+      ? `UniProt mapping failed: ${messages.join('; ')}`
+      : 'UniProt mapping job failed.',
+    {
+      reason: 'mapping_failed',
+      recovery: {
+        hint: limit
+          ? 'Submit fewer IDs, use an exact tax_id, or target UniProtKB-Swiss-Prot to reduce mapped results.'
+          : 'Check the submitted identifiers and databases, then submit a fresh mapping job; retry later if the failure persists.',
+      },
+    },
+    { cause },
+  );
 }
 
 // --- Module-level normalizers (no class state) ---

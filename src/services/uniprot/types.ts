@@ -467,7 +467,17 @@ export type IdMappingContinuation = {
 /** One completed ID-mapping results page, including upstream failure metadata. */
 export type IdMappingPage = {
   /** `inactive` is present only on a row whose UniProtKB target is inactive. */
-  results: { from: string; to: string; inactive?: InactiveReason }[];
+  results: {
+    from: string;
+    to: string;
+    inactive?: InactiveReason;
+    entryName?: string;
+    reviewed?: boolean;
+    organism?: { taxonId: number; scientificName?: string };
+    gene?: string;
+  }[];
+  totalMappings?: number;
+  identityUnavailable?: boolean;
   /**
    * UniProt's job-wide count of inactive targets, set only when this page's
    * inactive rows could not be identified (the lookup failed, or returned a page with

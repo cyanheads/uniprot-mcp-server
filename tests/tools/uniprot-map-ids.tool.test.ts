@@ -61,9 +61,11 @@ afterEach(() => {
 describe('mapIds validation', () => {
   it('translates a real continuation HTTP 400 into safe typed recovery', async () => {
     const fetchStub = routeUpstream((url) =>
-      url.pathname === '/idmapping/results/Abc123'
-        ? upstreamResponse(400, { messages: ['For input string: decoded garbage'] })
-        : undefined,
+      url.pathname === '/idmapping/details/Abc123'
+        ? upstreamResponse(200, { to: 'PDB' })
+        : url.pathname === '/idmapping/results/Abc123'
+          ? upstreamResponse(400, { messages: ['For input string: decoded garbage'] })
+          : undefined,
     );
     vi.stubGlobal('fetch', fetchStub);
     resumeMappingPageMock.mockImplementation(realService.resumeMappingPage.bind(realService));
@@ -83,6 +85,7 @@ describe('mapIds validation', () => {
     expect(contentText(result)).not.toContain('decoded garbage');
     expect(contentText(result)).toContain('Recovery:');
     expect(requestedUrls(fetchStub).map((url) => url.pathname)).toEqual([
+      '/idmapping/details/Abc123',
       '/idmapping/results/Abc123',
     ]);
   });
@@ -327,15 +330,11 @@ describe('mapIds start path', () => {
     expect(getEnrichment(ctx).unmappedIds).toEqual(['NOSUCHGENE']);
   });
 
-  it('maps an unsupported db pair (400 from the service) to the unsupported_db_pair contract', async () => {
-    // fetchWithTimeout maps a 400 to McpError(InvalidParams) with a "Fetch failed … Status: 400"
-    // message — the handler must detect it by code, not by string-matching the message.
+  it('maps a typed unsupported pair from the service to its contract', async () => {
     mapIdsMock.mockRejectedValue(
-      new McpError(
-        JsonRpcErrorCode.InvalidParams,
-        'Fetch failed for https://rest.uniprot.org/idmapping/run. Status: 400',
-        { statusCode: 400 },
-      ),
+      new McpError(JsonRpcErrorCode.ValidationError, 'UniProt rejected the database pair.', {
+        reason: 'unsupported_db_pair',
+      }),
     );
     const ctx = createMockContext({ errors: mapIds.errors });
     const input = mapIds.input.parse({
@@ -428,7 +427,7 @@ describe('mapIds inactive targets (real service, through runToolContract)', () =
     entryType: 'UniProtKB reviewed (Swiss-Prot)',
   });
 
-  it('keeps active targets as bare from/to rows at no extra request (characterization)', async () => {
+  it('adds reviewed identity to active targets without an extra results request', async () => {
     const fetchStub = jobReturns([
       { from: 'Q13140', to: activeTarget('P02768') },
       { from: 'P04637', to: activeTarget('P04637') },
@@ -442,15 +441,15 @@ describe('mapIds inactive targets (real service, through runToolContract)', () =
     expect(result.isError).toBeFalsy();
     const out = result.structuredContent as { results: object[] };
     expect(out.results).toEqual([
-      { from: 'Q13140', to: 'P02768' },
-      { from: 'P04637', to: 'P04637' },
+      { from: 'Q13140', to: 'P02768', reviewed: true },
+      { from: 'P04637', to: 'P04637', reviewed: true },
     ]);
     expect(contentText(result)).not.toContain('nactive');
     // run, status, results — nothing more for a job with no inactive target.
     expect(requestedUrls(fetchStub).map((u) => u.pathname)).toEqual([
       '/idmapping/run',
       '/idmapping/status/job-inactive',
-      '/idmapping/results/job-inactive',
+      '/idmapping/uniprotkb/results/job-inactive',
     ]);
   });
 
@@ -521,8 +520,13 @@ describe('mapIds inactive targets (real service, through runToolContract)', () =
       expect(result.isError).toBeFalsy();
       const out = result.structuredContent as { results: object[]; mappedCount: number };
       expect(out.results).toEqual([
-        { from: 'GENE1', to: stub.primaryAccession, inactive: marker },
-        { from: 'P04637', to: 'P04637' },
+        {
+          from: 'GENE1',
+          to: stub.primaryAccession,
+          inactive: marker,
+          ...('uniProtkbId' in stub ? { entryName: stub.uniProtkbId } : {}),
+        },
+        { from: 'P04637', to: 'P04637', reviewed: true },
       ]);
       // The row stays a mapping — it is not dropped from the count.
       expect(out.mappedCount).toBe(2);
@@ -532,7 +536,9 @@ describe('mapIds inactive targets (real service, through runToolContract)', () =
       // One extra read of the same page from the endpoint that carries the stub.
       const reread = requestedUrls(fetchStub).at(-1);
       expect(reread?.pathname).toBe('/idmapping/uniprotkb/results/job-inactive');
-      expect(reread?.searchParams.get('fields')).toBe('accession');
+      expect(reread?.searchParams.get('fields')).toBe(
+        'accession,id,reviewed,organism_id,gene_primary',
+      );
       expect(reread?.searchParams.get('size')).toBe('500');
     },
   );
@@ -666,8 +672,8 @@ describe('mapIds completed-page continuation', () => {
     controller.abort();
     const result = await pending;
     expect(errorEnvelope(result).code).toBe(JsonRpcErrorCode.RequestCancelled);
-    expect(errorEnvelope(result).message).toBe('uniprot.mappingResults failed upstream (-32011).');
-    expect(contentText(result)).toBe('Error: uniprot.mappingResults failed upstream (-32011).');
+    expect(errorEnvelope(result).message).toBe('uniprot.mappingDetails failed upstream (-32011).');
+    expect(contentText(result)).toBe('Error: uniprot.mappingDetails failed upstream (-32011).');
     expect(fetchStub).toHaveBeenCalledTimes(1);
   });
   it.each([
@@ -837,7 +843,9 @@ describe('mapIds job id shape (real service, through runToolContract)', () => {
     expect(page.isError).toBeFalsy();
     expect(requestedUrls(fetchStub).map((u) => u.pathname)).toEqual([
       '/idmapping/status/3OVYSqg8Mm',
+      '/idmapping/details/3OVYSqg8Mm',
       '/idmapping/results/3OVYSqg8Mm',
+      '/idmapping/details/job_42-a',
       '/idmapping/results/job_42-a',
     ]);
   });

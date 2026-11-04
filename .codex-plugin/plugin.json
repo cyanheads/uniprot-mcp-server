@@ -15,7 +15,7 @@
   "interface": {
     "displayName": "uniprot-mcp-server",
     "shortDescription": "Protein research over UniProtKB: search by function, fetch curated records, map IDs, proteomes.",
-    "longDescription": "The protein-as-primary-entity research workflow over UniProt. Search UniProtKB by function, keyword, GO term, gene, or organism; retrieve full curated Swiss-Prot entries (function, catalytic activity, subcellular location, disease, PTMs, isoforms, sequence, cross-references); map identifiers across 100+ databases via the async ID-mapping service; and pull reference proteomes and taxonomy. Keyless, CC BY 4.0.",
+    "longDescription": "The protein-as-primary-entity research workflow over UniProt. Search UniProtKB by function, keyword, GO term, gene, or organism; retrieve full curated Swiss-Prot entries (function, catalytic activity, subcellular location, disease, PTMs, isoforms, sequence, cross-references); map identifiers across supported databases via the async ID-mapping service; and pull reference proteomes and taxonomy. Keyless, CC BY 4.0.",
     "developerName": "cyanheads",
     "category": "research",
     "capabilities": ["Read"],

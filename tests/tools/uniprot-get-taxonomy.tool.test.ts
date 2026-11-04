@@ -68,6 +68,66 @@ afterEach(() => {
 });
 
 describe('getTaxonomy', () => {
+  it.each([
+    [
+      'SARS-CoV-2',
+      [{ taxonId: 3092168, scientificName: 'SARS-CoV-2 pseudovirus' }],
+      'no_exact_match',
+    ],
+    [
+      'shared',
+      [
+        { taxonId: 1, scientificName: 'shared' },
+        { taxonId: 2, scientificName: 'shared' },
+      ],
+      'ambiguous_name',
+    ],
+  ])(
+    'preserves %s candidate guidance and recovery on both surfaces',
+    async (name, results, reason) => {
+      vi.stubGlobal(
+        'fetch',
+        routeUpstream(() => upstreamResponse(200, { results })),
+      );
+      getTaxonByNameMock.mockImplementation(realService.getTaxonByName.bind(realService));
+      const result = await runToolContract(getTaxonomy, { name });
+      const error = errorEnvelope(result);
+      expect(result.isError).toBe(true);
+      expect(error.data).toMatchObject({ reason });
+      const text = contentText(result);
+      expect(text).toContain(`reason ${reason}`);
+      expect(text).toContain('Recovery:');
+      for (const candidate of results) {
+        expect(error.message).toContain(String(candidate.taxonId));
+        expect(text).toContain(candidate.scientificName);
+        expect(text).toContain(String(candidate.taxonId));
+      }
+    },
+  );
+
+  it('resolves a common name through the real service and formats the selected taxon', async () => {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/taxonomy/9606'
+          ? upstreamResponse(200, {
+              taxonId: 9606,
+              scientificName: 'Homo sapiens',
+              commonName: 'Human',
+            })
+          : upstreamResponse(200, {
+              results: [
+                { taxonId: 10359, scientificName: 'Human cytomegalovirus' },
+                { taxonId: 9606, scientificName: 'Homo sapiens', commonName: 'Human' },
+              ],
+            }),
+      ),
+    );
+    getTaxonByNameMock.mockImplementation(realService.getTaxonByName.bind(realService));
+    const result = await runToolContract(getTaxonomy, { name: 'human' });
+    expect(result.structuredContent).toMatchObject({ taxon: { taxonId: 9606 } });
+    expect(contentText(result)).toContain('Homo sapiens (Human) — taxon 9606');
+  });
   it.each([{ taxon_id: 9606 }, { name: 'Homo sapiens' }])(
     'renders every alternative name for %j',
     async (input) => {

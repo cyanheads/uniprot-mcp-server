@@ -35,7 +35,7 @@ export const mapIds = tool('uniprot_map_ids', {
       .enum(ID_MAPPING_FROM_DBS)
       .optional()
       .describe(
-        'Source database. Gene_Name = HGNC symbol (pair with tax_id); UniProtKB_AC-ID = accession or entry name; Ensembl/Ensembl_Protein = ENSG/ENSP; PDB; RefSeq_Nucleotide/RefSeq_Protein = NM_/NP_; ChEMBL; GeneID = NCBI Gene. Required only when submitting a new mapping job; omitted when resuming with a ticket or continuation.',
+        'Source database. Gene_Name = gene symbol (e.g. TP53; pair with tax_id); UniProtKB_AC-ID = accession or entry name; Ensembl/Ensembl_Protein = ENSG/ENSP; PDB; RefSeq_Nucleotide/RefSeq_Protein = NM_/NP_; ChEMBL; GeneID = NCBI Gene. Required only when submitting a new mapping job; omitted when resuming with a ticket or continuation.',
       ),
     to_db: z
       .enum(ID_MAPPING_TO_DBS)
@@ -60,7 +60,7 @@ export const mapIds = tool('uniprot_map_ids', {
       .positive()
       .optional()
       .describe(
-        'NCBI taxon ID to disambiguate ambiguous source IDs (e.g. a gene symbol across species). Recommended with Gene_Name; e.g. 9606 for human.',
+        'Exact NCBI taxon node for submission, e.g. 9606 for human. Unlike protein search taxonomy filters, this excludes descendant strains and subspecies. Resolve the strain taxon with uniprot_get_taxonomy when needed; no descendant filtering is applied to mapped results.',
       ),
     ticket: z
       .string()
@@ -85,6 +85,22 @@ export const mapIds = tool('uniprot_map_ids', {
           .object({
             from: z.string().describe('The source identifier that was mapped.'),
             to: z.string().describe('The resolved target identifier (e.g. a UniProtKB accession).'),
+            entryName: z.string().optional().describe('UniProtKB entry name when available.'),
+            reviewed: z
+              .boolean()
+              .optional()
+              .describe('Whether UniProtKB marks the target reviewed.'),
+            organism: z
+              .object({
+                taxonId: z.number().describe('Target NCBI taxon ID.'),
+                scientificName: z
+                  .string()
+                  .optional()
+                  .describe('Target organism name when available.'),
+              })
+              .optional()
+              .describe('UniProtKB target organism when available.'),
+            gene: z.string().optional().describe('Primary target gene name when available.'),
             inactive: z
               .object({
                 reason: z
@@ -135,24 +151,36 @@ export const mapIds = tool('uniprot_map_ids', {
     mappedCount: z
       .number()
       .optional()
-      .describe('Number of resolved mappings (finished jobs only).'),
+      .describe('Number of resolved mappings on this page (finished jobs only).'),
+    totalMappings: z
+      .number()
+      .optional()
+      .describe('Job-wide total mappings reported by UniProt; absent when unavailable.'),
     unmappedIds: z
       .array(z.string().describe('A source ID that resolved to nothing.'))
       .optional()
       .describe(
-        'Source IDs UniProt reported as failed on this completed page. Absent when none failed.',
+        'Job-wide source IDs UniProt reported as failed, repeated on every completed page. Absent when none failed.',
       ),
     notice: z
       .string()
       .optional()
       .describe(
-        'Status guidance — e.g. that the job is still running, that no IDs mapped, or that inactive targets could not be marked on this page.',
+        'Status guidance — e.g. that the job is still running, that no IDs mapped, that target identity is unavailable, or that inactive targets could not be marked on this page.',
       ),
   },
   enrichmentTrailer: {
     unmappedIds: { render: (ids: string[]) => `**Unmapped IDs:** ${ids.join(', ')}` },
   },
   errors: [
+    {
+      reason: 'mapping_failed',
+      code: JsonRpcErrorCode.ValidationError,
+      thrownBy: 'service',
+      when: 'UniProt reports a terminal ERROR for the mapping job.',
+      recovery:
+        'Check the submitted identifiers and databases, then submit a fresh job with fewer identifiers if a mapping limit was exceeded.',
+    },
     {
       reason: 'missing_inputs',
       code: JsonRpcErrorCode.ValidationError,
@@ -259,7 +287,7 @@ export const mapIds = tool('uniprot_map_ids', {
       try {
         result = await service.mapIds(input.from_db, input.to_db, input.ids, input.tax_id, ctx);
       } catch (err) {
-        if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
+        if (err instanceof McpError && err.data?.reason === 'unsupported_db_pair') {
           throw ctx.fail(
             'unsupported_db_pair',
             `Mapping ${input.from_db} → ${input.to_db} is not supported.`,
@@ -286,11 +314,18 @@ export const mapIds = tool('uniprot_map_ids', {
 
     ctx.enrich({
       mappedCount: result.results.length,
+      ...(result.totalMappings !== undefined ? { totalMappings: result.totalMappings } : {}),
       ...(result.failedIds.length ? { unmappedIds: result.failedIds } : {}),
     });
     if (result.results.length === 0) {
-      ctx.enrich.notice('Completed result page contains no mappings in the target database.');
+      ctx.enrich.notice(
+        'Completed result page contains no mappings in the target database. Mapping tax_id matches an exact taxon node; use uniprot_get_taxonomy to resolve the strain taxon, or omit tax_id for a deliberately global job. Protein search taxonomy filters include descendants.',
+      );
     }
+    if (result.identityUnavailable)
+      ctx.enrich.notice(
+        'UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. Enrichment is unavailable for jobs above 100,000 mapped IDs.',
+      );
     if (result.inactiveUnchecked) {
       ctx.enrich.notice(
         `UniProt reports ${result.inactiveUnchecked} inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.`,
@@ -328,6 +363,17 @@ export const mapIds = tool('uniprot_map_ids', {
       } else {
         lines.push('', '| From | To |', '| --- | --- |');
         for (const r of results) lines.push(`| ${r.from} | ${r.to} |`);
+        for (const r of results) {
+          const identity = [
+            r.entryName,
+            r.reviewed === undefined ? undefined : `reviewed: ${r.reviewed}`,
+            r.organism
+              ? `taxon ${r.organism.taxonId}${r.organism.scientificName ? ` (${r.organism.scientificName})` : ''}`
+              : undefined,
+            r.gene ? `gene: ${r.gene}` : undefined,
+          ].filter((value) => value !== undefined);
+          if (identity.length) lines.push(`- ${r.from} → ${r.to}: ${identity.join('; ')}`);
+        }
         const inactiveRows = results.filter((r) => r.inactive);
         if (inactiveRows.length) {
           lines.push('', '**Inactive targets** (no entry to fetch):');
