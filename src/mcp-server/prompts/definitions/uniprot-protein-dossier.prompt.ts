@@ -38,7 +38,7 @@ export const proteinDossier = prompt('uniprot_protein_dossier', {
 
 Follow this workflow with the uniprot-mcp-server tools:
 
-1. Resolve the identifier to a UniProtKB accession. If it looks like a gene name, use uniprot_map_ids (from_db: Gene_Name, to_db: UniProtKB-Swiss-Prot${args.organism ? ', plus the tax_id' : ''}) to get the reviewed accession. If it is already an accession (matches the [OPQ]... pattern), skip this step. If it is a free-text protein name, use uniprot_search_proteins (text_search, reviewed: true) and take the top hit's accession.
+1. Resolve the identifier to a UniProtKB accession. If it looks like a gene name, use uniprot_map_ids (from_db: Gene_Name, to_db: UniProtKB-Swiss-Prot${args.organism ? ', plus the tax_id' : ''}) to find reviewed candidates. If it is already a UniProtKB accession, skip discovery. For a free-text protein name, use uniprot_search_proteins (text_search, reviewed: true). Check each candidate's protein/gene identity, organism, and reviewed status before selecting an accession. If biologically distinct candidates remain, narrow the search or ask which organism, strain, or protein is intended; do not select by ranking alone.
 
 2. Fetch the full curated record with uniprot_get_entry for that accession. If the response comes back as an outline, re-call with sections covering function, catalyticActivity, subcellularLocation, disease, goTerms, and xrefs. Fetch variants in a re-call of its own, and when the outline lists it far over the budget, page it with sections: ["variants"], section_limit, and section_offset.
 
