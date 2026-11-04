@@ -317,20 +317,23 @@ export const mapIds = tool('uniprot_map_ids', {
       ...(result.totalMappings !== undefined ? { totalMappings: result.totalMappings } : {}),
       ...(result.failedIds.length ? { unmappedIds: result.failedIds } : {}),
     });
+    // ctx.enrich.notice is last-wins, so every notice that applies to the page goes out as one.
+    const notices: string[] = [];
     if (result.results.length === 0) {
-      ctx.enrich.notice(
+      notices.push(
         'Completed result page contains no mappings in the target database. Mapping tax_id matches an exact taxon node; use uniprot_get_taxonomy to resolve the strain taxon, or omit tax_id for a deliberately global job. Protein search taxonomy filters include descendants.',
       );
     }
     if (result.identityUnavailable)
-      ctx.enrich.notice(
+      notices.push(
         'UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. Enrichment is unavailable for jobs above 100,000 mapped IDs.',
       );
     if (result.inactiveUnchecked) {
-      ctx.enrich.notice(
+      notices.push(
         `UniProt reports ${result.inactiveUnchecked} inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.`,
       );
     }
+    if (notices.length) ctx.enrich.notice(notices.join(' '));
     ctx.log.info('ID mapping finished', {
       mode,
       ...(input.from_db ? { from: input.from_db } : {}),

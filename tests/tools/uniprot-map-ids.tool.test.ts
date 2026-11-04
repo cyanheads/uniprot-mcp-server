@@ -470,8 +470,9 @@ describe('mapIds inactive targets (real service, through runToolContract)', () =
     expect(result.isError).toBeFalsy();
     const out = result.structuredContent as { results: object[]; notice?: string };
     expect(out.results).toEqual([{ from: 'Q9ZZZ9', to: 'Q9ZZZ9' }]);
+    // The same 404 also fails the identity read, so both disclosures apply to the page.
     expect(out.notice).toBe(
-      'UniProt reports 1 inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.',
+      'UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. Enrichment is unavailable for jobs above 100,000 mapped IDs. UniProt reports 1 inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.',
     );
     expect(contentText(result)).toContain('could not be identified');
   });
@@ -748,6 +749,34 @@ describe('mapIds completed-page continuation', () => {
     );
     expect(result).toEqual({ status: 'finished', results: [] });
     expect(getEnrichment(ctx).notice).toContain('no mappings');
+  });
+
+  it.each([
+    [
+      'an empty page without target identity',
+      { results: [], identityUnavailable: true },
+      ['contains no mappings', 'exact taxon node', 'identity is unavailable'],
+    ],
+    [
+      'unidentified inactive targets without target identity',
+      { results: [{ from: 'x', to: 'P04637' }], identityUnavailable: true, inactiveUnchecked: 2 },
+      ['identity is unavailable', '100,000 mapped IDs', '2 inactive', 'could not be identified'],
+    ],
+  ])('keeps every notice for %s on both surfaces', async (_case, page, fragments) => {
+    resumeMappingPageMock.mockResolvedValue({
+      status: 'finished',
+      failedIds: [],
+      ...page,
+    } satisfies IdMappingResult);
+
+    const result = await runToolContract(mapIds, {
+      continuation: { jobId: 'job-pages', cursor: 'c' },
+    });
+    const notice = (result.structuredContent as { notice?: string }).notice;
+    for (const fragment of fragments) {
+      expect(notice).toContain(fragment);
+      expect(contentText(result)).toContain(fragment);
+    }
   });
 
   it('maps an unknown or expired completed-page continuation to invalid_continuation', async () => {
