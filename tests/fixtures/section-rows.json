@@ -1,0 +1,756 @@
+{
+  "P69905BindingSite": {
+    "type": "Binding site",
+    "location": {
+      "start": { "value": 88, "modifier": "EXACT" },
+      "end": { "value": 88, "modifier": "EXACT" }
+    },
+    "description": "proximal binding residue",
+    "featureCrossReferences": [
+      { "database": "ChEBI", "id": "CHEBI:60344" },
+      { "database": "ChEBI", "id": "CHEBI:18248" }
+    ],
+    "evidences": [{ "evidenceCode": "ECO:0000255", "source": "PROSITE-ProRule", "id": "PRU00238" }],
+    "ligand": { "name": "heme b", "id": "ChEBI:CHEBI:60344" },
+    "ligandPart": { "name": "Fe", "id": "ChEBI:CHEBI:18248" }
+  },
+  "P07477Mutagenesis": {
+    "type": "Mutagenesis",
+    "location": {
+      "start": { "value": 154, "modifier": "EXACT" },
+      "end": { "value": 154, "modifier": "EXACT" }
+    },
+    "description": "Lack of sulfation.",
+    "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "17087724" }],
+    "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["F"] }
+  },
+  "P29972": {
+    "entryType": "UniProtKB reviewed (Swiss-Prot)",
+    "primaryAccession": "P29972",
+    "uniProtkbId": "AQP1_HUMAN",
+    "organism": {
+      "scientificName": "Homo sapiens",
+      "commonName": "Human",
+      "taxonId": 9606,
+      "lineage": [
+        "Eukaryota",
+        "Metazoa",
+        "Chordata",
+        "Craniata",
+        "Vertebrata",
+        "Euteleostomi",
+        "Mammalia",
+        "Eutheria",
+        "Euarchontoglires",
+        "Primates",
+        "Haplorrhini",
+        "Catarrhini",
+        "Hominidae",
+        "Homo"
+      ]
+    },
+    "proteinExistence": "1: Evidence at protein level",
+    "annotationScore": 5.0,
+    "proteinDescription": {
+      "recommendedName": {
+        "fullName": { "evidences": [{ "evidenceCode": "ECO:0000305" }], "value": "Aquaporin-1" },
+        "shortNames": [{ "value": "AQP-1" }]
+      },
+      "alternativeNames": [
+        { "fullName": { "value": "Aquaporin-CHIP" } },
+        {
+          "fullName": {
+            "evidences": [{ "evidenceCode": "ECO:0000303", "source": "PubMed", "id": "1722319" }],
+            "value": "Channel-like integral membrane protein of 28 kDa"
+          }
+        },
+        { "fullName": { "value": "Urine water channel" } }
+      ]
+    },
+    "genes": [
+      {
+        "geneName": {
+          "evidences": [{ "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:633" }],
+          "value": "AQP1"
+        },
+        "synonyms": [
+          {
+            "evidences": [{ "evidenceCode": "ECO:0000303", "source": "PubMed", "id": "1722319" }],
+            "value": "CHIP28"
+          }
+        ]
+      }
+    ],
+    "sequence": { "length": 269 },
+    "extraAttributes": { "uniParcId": "UPI000005339A" },
+    "features": [
+      {
+        "type": "Initiator methionine",
+        "location": {
+          "start": { "value": 1, "modifier": "EXACT" },
+          "end": { "value": 1, "modifier": "EXACT" }
+        },
+        "description": "Removed",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "2007592" }]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 2, "modifier": "EXACT" },
+          "end": { "value": 11, "modifier": "EXACT" }
+        },
+        "description": "Cytoplasmic",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Transmembrane",
+        "location": {
+          "start": { "value": 12, "modifier": "EXACT" },
+          "end": { "value": 29, "modifier": "EXACT" }
+        },
+        "description": "Helical; Name=Helix 1",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 30, "modifier": "EXACT" },
+          "end": { "value": 46, "modifier": "EXACT" }
+        },
+        "description": "Extracellular",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Transmembrane",
+        "location": {
+          "start": { "value": 47, "modifier": "EXACT" },
+          "end": { "value": 65, "modifier": "EXACT" }
+        },
+        "description": "Helical; Name=Helix 2",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 66, "modifier": "EXACT" },
+          "end": { "value": 68, "modifier": "EXACT" }
+        },
+        "description": "Cytoplasmic",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Intramembrane",
+        "location": {
+          "start": { "value": 69, "modifier": "EXACT" },
+          "end": { "value": 82, "modifier": "EXACT" }
+        },
+        "description": "",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 83, "modifier": "EXACT" },
+          "end": { "value": 90, "modifier": "EXACT" }
+        },
+        "description": "Cytoplasmic",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Transmembrane",
+        "location": {
+          "start": { "value": 91, "modifier": "EXACT" },
+          "end": { "value": 109, "modifier": "EXACT" }
+        },
+        "description": "Helical; Name=Helix 3",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 110, "modifier": "EXACT" },
+          "end": { "value": 133, "modifier": "EXACT" }
+        },
+        "description": "Extracellular",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Transmembrane",
+        "location": {
+          "start": { "value": 134, "modifier": "EXACT" },
+          "end": { "value": 153, "modifier": "EXACT" }
+        },
+        "description": "Helical; Name=Helix 4",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 154, "modifier": "EXACT" },
+          "end": { "value": 163, "modifier": "EXACT" }
+        },
+        "description": "Cytoplasmic",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Transmembrane",
+        "location": {
+          "start": { "value": 164, "modifier": "EXACT" },
+          "end": { "value": 181, "modifier": "EXACT" }
+        },
+        "description": "Helical; Name=Helix 5",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 182, "modifier": "EXACT" },
+          "end": { "value": 186, "modifier": "EXACT" }
+        },
+        "description": "Extracellular",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Intramembrane",
+        "location": {
+          "start": { "value": 187, "modifier": "EXACT" },
+          "end": { "value": 199, "modifier": "EXACT" }
+        },
+        "description": "",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 200, "modifier": "EXACT" },
+          "end": { "value": 206, "modifier": "EXACT" }
+        },
+        "description": "Extracellular",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      },
+      {
+        "type": "Transmembrane",
+        "location": {
+          "start": { "value": 207, "modifier": "EXACT" },
+          "end": { "value": 224, "modifier": "EXACT" }
+        },
+        "description": "Helical; Name=Helix 6",
+        "evidences": [
+          { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "35835865" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8CT2" }
+        ]
+      },
+      {
+        "type": "Topological domain",
+        "location": {
+          "start": { "value": 225, "modifier": "EXACT" },
+          "end": { "value": 269, "modifier": "EXACT" }
+        },
+        "description": "Cytoplasmic",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7507481" }]
+      }
+    ]
+  },
+  "P01308": {
+    "entryType": "UniProtKB reviewed (Swiss-Prot)",
+    "primaryAccession": "P01308",
+    "uniProtkbId": "INS_HUMAN",
+    "organism": {
+      "scientificName": "Homo sapiens",
+      "commonName": "Human",
+      "taxonId": 9606,
+      "lineage": [
+        "Eukaryota",
+        "Metazoa",
+        "Chordata",
+        "Craniata",
+        "Vertebrata",
+        "Euteleostomi",
+        "Mammalia",
+        "Eutheria",
+        "Euarchontoglires",
+        "Primates",
+        "Haplorrhini",
+        "Catarrhini",
+        "Hominidae",
+        "Homo"
+      ]
+    },
+    "proteinExistence": "1: Evidence at protein level",
+    "annotationScore": 5.0,
+    "proteinDescription": {
+      "recommendedName": { "fullName": { "value": "Insulin" } },
+      "contains": [
+        { "recommendedName": { "fullName": { "value": "Insulin B chain" } } },
+        { "recommendedName": { "fullName": { "value": "Insulin A chain" } } }
+      ],
+      "flag": "Precursor"
+    },
+    "genes": [{ "geneName": { "value": "INS" } }],
+    "sequence": {
+      "value": "MALWMRLLPLLALLALWGPDPAAAFVNQHLCGSHLVEALYLVCGERGFFYTPKTRREAEDLQVGQVELGGGPGAGSLQPLALEGSLQKRGIVEQCCTSICSLYQLENYCN",
+      "length": 110,
+      "molWeight": 11981,
+      "crc64": "C2C3B23B85E520E5",
+      "md5": "12E9C9E4E2835C302E8BA615115EDDA3"
+    },
+    "extraAttributes": {
+      "countByCommentType": {
+        "FUNCTION": 1,
+        "SUBUNIT": 1,
+        "INTERACTION": 9,
+        "SUBCELLULAR LOCATION": 1,
+        "ALTERNATIVE PRODUCTS": 2,
+        "TISSUE SPECIFICITY": 1,
+        "PTM": 1,
+        "DISEASE": 4,
+        "PHARMACEUTICAL": 1,
+        "SIMILARITY": 1,
+        "SEQUENCE CAUTION": 1,
+        "WEB RESOURCE": 2
+      },
+      "countByFeatureType": {
+        "Signal": 1,
+        "Peptide": 2,
+        "Propeptide": 1,
+        "Disulfide bond": 3,
+        "Natural variant": 27,
+        "Helix": 9,
+        "Beta strand": 3,
+        "Turn": 2
+      },
+      "uniParcId": "UPI00000017EA"
+    },
+    "features": [
+      {
+        "type": "Signal",
+        "location": {
+          "start": { "value": 1, "modifier": "EXACT" },
+          "end": { "value": 24, "modifier": "EXACT" }
+        },
+        "description": "",
+        "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "14426955" }]
+      },
+      {
+        "type": "Peptide",
+        "location": {
+          "start": { "value": 25, "modifier": "EXACT" },
+          "end": { "value": 54, "modifier": "EXACT" }
+        },
+        "description": "Insulin B chain",
+        "featureId": "PRO_0000015819"
+      },
+      {
+        "type": "Propeptide",
+        "location": {
+          "start": { "value": 57, "modifier": "EXACT" },
+          "end": { "value": 87, "modifier": "EXACT" }
+        },
+        "description": "C peptide",
+        "featureId": "PRO_0000015820"
+      },
+      {
+        "type": "Peptide",
+        "location": {
+          "start": { "value": 90, "modifier": "EXACT" },
+          "end": { "value": 110, "modifier": "EXACT" }
+        },
+        "description": "Insulin A chain",
+        "featureId": "PRO_0000015821"
+      }
+    ]
+  },
+  "P00505": {
+    "entryType": "UniProtKB reviewed (Swiss-Prot)",
+    "primaryAccession": "P00505",
+    "uniProtkbId": "AATM_HUMAN",
+    "organism": {
+      "scientificName": "Homo sapiens",
+      "commonName": "Human",
+      "taxonId": 9606,
+      "lineage": [
+        "Eukaryota",
+        "Metazoa",
+        "Chordata",
+        "Craniata",
+        "Vertebrata",
+        "Euteleostomi",
+        "Mammalia",
+        "Eutheria",
+        "Euarchontoglires",
+        "Primates",
+        "Haplorrhini",
+        "Catarrhini",
+        "Hominidae",
+        "Homo"
+      ]
+    },
+    "proteinExistence": "1: Evidence at protein level",
+    "annotationScore": 5.0,
+    "proteinDescription": {
+      "recommendedName": {
+        "fullName": { "value": "Aspartate aminotransferase, mitochondrial" },
+        "shortNames": [{ "value": "mAspAT" }],
+        "ecNumbers": [
+          {
+            "evidences": [
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "26902786" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "31422819" }
+            ],
+            "value": "2.6.1.1"
+          },
+          {
+            "evidences": [{ "evidenceCode": "ECO:0000250", "source": "UniProtKB", "id": "P00507" }],
+            "value": "2.6.1.7"
+          }
+        ]
+      },
+      "alternativeNames": [
+        {
+          "fullName": { "value": "Fatty acid-binding protein" },
+          "shortNames": [{ "value": "FABP-1" }]
+        },
+        { "fullName": { "value": "Glutamate oxaloacetate transaminase 2" } },
+        { "fullName": { "value": "Kynurenine aminotransferase 4" } },
+        { "fullName": { "value": "Kynurenine aminotransferase IV" } },
+        { "fullName": { "value": "Kynurenine--oxoglutarate transaminase 4" } },
+        { "fullName": { "value": "Kynurenine--oxoglutarate transaminase IV" } },
+        {
+          "fullName": { "value": "Plasma membrane-associated fatty acid-binding protein" },
+          "shortNames": [{ "value": "FABPpm" }]
+        },
+        { "fullName": { "value": "Transaminase A" } }
+      ],
+      "flag": "Precursor"
+    },
+    "genes": [
+      {
+        "geneName": {
+          "evidences": [{ "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:4433" }],
+          "value": "GOT2"
+        },
+        "synonyms": [
+          {
+            "evidences": [{ "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:4433" }],
+            "value": "KYAT4"
+          }
+        ]
+      }
+    ],
+    "sequence": {
+      "value": "MALLHSGRVLPGIAAAFHPGLAAAASARASSWWTHVEMGPPDPILGVTEAFKRDTNSKKMNLGVGAYRDDNGKPYVLPSVRKAEAQIAAKNLDKEYLPIGGLAEFCKASAELALGENSEVLKSGRFVTVQTISGTGALRIGASFLQRFFKFSRDVFLPKPTWGNHTPIFRDAGMQLQGYRYYDPKTCGFDFTGAVEDISKIPEQSVLLLHACAHNPTGVDPRPEQWKEIATVVKKRNLFAFFDMAYQGFASGDGDKDAWAVRHFIEQGINVCLCQSYAKNMGLYGERVGAFTMVCKDADEAKRVESQLKILIRPMYSNPPLNGARIAAAILNTPDLRKQWLQEVKVMADRIIGMRTQLVSNLKKEGSTHNWQHITDQIGMFCFTGLKPEQVERLIKEFSIYMTKDGRISVAGVTSSNVGYLAHAIHQVTK",
+      "length": 430,
+      "molWeight": 47518,
+      "crc64": "F559567ABF2DB346",
+      "md5": "E49C4654575B845F9AEB6858C71D1C2C"
+    },
+    "extraAttributes": {
+      "countByCommentType": {
+        "FUNCTION": 1,
+        "CATALYTIC ACTIVITY": 2,
+        "COFACTOR": 1,
+        "BIOPHYSICOCHEMICAL PROPERTIES": 1,
+        "SUBUNIT": 1,
+        "SUBCELLULAR LOCATION": 1,
+        "ALTERNATIVE PRODUCTS": 2,
+        "INDUCTION": 1,
+        "DISEASE": 1,
+        "MISCELLANEOUS": 1,
+        "SIMILARITY": 1
+      },
+      "countByFeatureType": {
+        "Transit peptide": 1,
+        "Chain": 1,
+        "Binding site": 4,
+        "Modified residue": 40,
+        "Alternative sequence": 1,
+        "Natural variant": 8,
+        "Sequence conflict": 4,
+        "Turn": 7,
+        "Helix": 20,
+        "Beta strand": 10
+      },
+      "uniParcId": "UPI000013CB99"
+    },
+    "features": [
+      {
+        "type": "Transit peptide",
+        "location": {
+          "start": { "value": 1, "modifier": "EXACT" },
+          "end": { "value": 29, "modifier": "EXACT" }
+        },
+        "description": "Mitochondrion",
+        "evidences": [
+          { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "4052435" },
+          { "evidenceCode": "ECO:0007744", "source": "PubMed", "id": "25944712" }
+        ]
+      },
+      {
+        "type": "Binding site",
+        "location": {
+          "start": { "value": 65, "modifier": "EXACT" },
+          "end": { "value": 65, "modifier": "EXACT" }
+        },
+        "description": "",
+        "evidences": [{ "evidenceCode": "ECO:0000250" }],
+        "ligand": { "name": "substrate" }
+      },
+      {
+        "type": "Binding site",
+        "location": {
+          "start": { "value": 162, "modifier": "EXACT" },
+          "end": { "value": 162, "modifier": "EXACT" }
+        },
+        "description": "",
+        "evidences": [{ "evidenceCode": "ECO:0000250" }],
+        "ligand": { "name": "substrate" }
+      },
+      {
+        "type": "Binding site",
+        "location": {
+          "start": { "value": 215, "modifier": "EXACT" },
+          "end": { "value": 215, "modifier": "EXACT" }
+        },
+        "description": "",
+        "evidences": [{ "evidenceCode": "ECO:0000250" }],
+        "ligand": { "name": "substrate" }
+      },
+      {
+        "type": "Binding site",
+        "location": {
+          "start": { "value": 407, "modifier": "EXACT" },
+          "end": { "value": 407, "modifier": "EXACT" }
+        },
+        "description": "",
+        "evidences": [{ "evidenceCode": "ECO:0000250" }],
+        "ligand": { "name": "substrate" }
+      }
+    ]
+  },
+  "P00327": {
+    "entryType": "UniProtKB reviewed (Swiss-Prot)",
+    "primaryAccession": "P00327",
+    "uniProtkbId": "ADH1E_HORSE",
+    "organism": {
+      "scientificName": "Equus caballus",
+      "commonName": "Horse",
+      "taxonId": 9796,
+      "lineage": [
+        "Eukaryota",
+        "Metazoa",
+        "Chordata",
+        "Craniata",
+        "Vertebrata",
+        "Euteleostomi",
+        "Mammalia",
+        "Eutheria",
+        "Laurasiatheria",
+        "Perissodactyla",
+        "Equidae",
+        "Equus"
+      ]
+    },
+    "proteinExistence": "1: Evidence at protein level",
+    "annotationScore": 4.0,
+    "proteinDescription": {
+      "recommendedName": {
+        "fullName": { "value": "Alcohol dehydrogenase E chain" },
+        "ecNumbers": [{ "value": "1.1.1.1" }]
+      }
+    },
+    "sequence": { "length": 375 },
+    "extraAttributes": { "uniParcId": "UPI000016C424" },
+    "features": [
+      {
+        "type": "Binding site",
+        "location": {
+          "start": { "value": 47, "modifier": "EXACT" },
+          "end": { "value": 47, "modifier": "EXACT" }
+        },
+        "description": "",
+        "featureCrossReferences": [{ "database": "ChEBI", "id": "CHEBI:29105" }],
+        "evidences": [
+          { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "15299346" },
+          { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "178875" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1A71" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1A72" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADB" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADC" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADF" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADG" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1AXE" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1AXG" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1BTO" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1HET" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1HLD" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1JU9" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1LDE" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1LDY" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1MG0" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1MGO" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1N8K" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1N92" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1P1R" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QLH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QLJ" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QV6" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QV7" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1YE3" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "2JHG" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "2OHX" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "3BTO" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "3OQ6" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4DWV" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4DXH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4NFH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4NFS" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4NG5" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4XD2" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "5ADH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "6ADH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "7ADH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8ADH" }
+        ],
+        "ligand": { "name": "Zn(2+)", "id": "ChEBI:CHEBI:29105", "label": "1", "note": "catalytic" }
+      },
+      {
+        "type": "Binding site",
+        "location": {
+          "start": { "value": 98, "modifier": "EXACT" },
+          "end": { "value": 98, "modifier": "EXACT" }
+        },
+        "description": "",
+        "featureCrossReferences": [{ "database": "ChEBI", "id": "CHEBI:29105" }],
+        "evidences": [
+          { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "15299346" },
+          { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "178875" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1A71" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1A72" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADB" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADC" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADF" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1ADG" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1AXE" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1AXG" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1BTO" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1HET" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1HLD" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1JU9" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1LDE" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1LDY" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1MG0" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1MGO" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1N8K" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1N92" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1P1R" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QLH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QLJ" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QV6" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1QV7" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "1YE3" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "2JHG" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "2OHX" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "2OXI" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "3BTO" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "3OQ6" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4DWV" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4DXH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4NFH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4NFS" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4NG5" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "4XD2" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "5ADH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "6ADH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "7ADH" },
+          { "evidenceCode": "ECO:0007744", "source": "PDB", "id": "8ADH" }
+        ],
+        "ligand": { "name": "Zn(2+)", "id": "ChEBI:CHEBI:29105", "label": "2" }
+      }
+    ]
+  },
+  "P0A7V8": {
+    "entryType": "UniProtKB reviewed (Swiss-Prot)",
+    "primaryAccession": "P0A7V8",
+    "organism": {
+      "scientificName": "Escherichia coli (strain K12)",
+      "taxonId": 83333,
+      "lineage": [
+        "Bacteria",
+        "Pseudomonadati",
+        "Pseudomonadota",
+        "Gammaproteobacteria",
+        "Enterobacterales",
+        "Enterobacteriaceae",
+        "Escherichia"
+      ]
+    },
+    "genes": [
+      {
+        "geneName": { "value": "rpsD" },
+        "synonyms": [{ "value": "ramA" }],
+        "orderedLocusNames": [{ "value": "b3296" }, { "value": "JW3258" }]
+      }
+    ],
+    "extraAttributes": { "uniParcId": "UPI000003EB6D" }
+  },
+  "P34110": {
+    "entryType": "UniProtKB reviewed (Swiss-Prot)",
+    "primaryAccession": "P34110",
+    "uniProtkbId": "VPS35_YEAST",
+    "annotationScore": 5.0,
+    "organism": {
+      "scientificName": "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)",
+      "commonName": "Baker's yeast",
+      "taxonId": 559292,
+      "lineage": [
+        "Eukaryota",
+        "Fungi",
+        "Dikarya",
+        "Ascomycota",
+        "Saccharomycotina",
+        "Saccharomycetes",
+        "Saccharomycetales",
+        "Saccharomycetaceae",
+        "Saccharomyces"
+      ]
+    },
+    "proteinExistence": "1: Evidence at protein level",
+    "proteinDescription": {
+      "recommendedName": {
+        "fullName": { "value": "Vacuolar protein sorting-associated protein 35" }
+      },
+      "alternativeNames": [{ "fullName": { "value": "Vacuolar protein-targeting protein 7" } }]
+    },
+    "genes": [
+      {
+        "geneName": { "value": "VPS35" },
+        "synonyms": [{ "value": "VPT7" }],
+        "orderedLocusNames": [{ "value": "YJL154C" }],
+        "orfNames": [{ "value": "J0580" }]
+      }
+    ],
+    "sequence": { "length": 944 },
+    "extraAttributes": { "uniParcId": "UPI0000138BF6" }
+  }
+}

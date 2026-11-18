@@ -27,6 +27,41 @@
           "format": "string",
           "isRequired": false,
           "default": "info"
+        },
+        {
+          "name": "UNIPROT_BASE_URL",
+          "description": "UniProt REST base URL. Override for a private mirror or testing.",
+          "format": "string",
+          "isRequired": false,
+          "default": "https://rest.uniprot.org"
+        },
+        {
+          "name": "UNIPROT_TIMEOUT_MS",
+          "description": "Per-request HTTP timeout in milliseconds.",
+          "format": "string",
+          "isRequired": false,
+          "default": "30000"
+        },
+        {
+          "name": "UNIPROT_ID_MAPPING_BUDGET_MS",
+          "description": "Milliseconds uniprot_map_ids polls a mapping job inline before returning a resumable ticket. Keep it below UNIPROT_TIMEOUT_MS.",
+          "format": "string",
+          "isRequired": false,
+          "default": "8000"
+        },
+        {
+          "name": "UNIPROT_DEFAULT_PAGE_SIZE",
+          "description": "Page size (1–500) for search and proteome protein listing when the caller leaves size unset.",
+          "format": "string",
+          "isRequired": false,
+          "default": "25"
+        },
+        {
+          "name": "UNIPROT_CLAMP_LIMITS",
+          "description": "Serve an over-the-cap size at 500 with a notice, accept any section_limit, and accept up to 500 accessions on uniprot_get_entry (the first 20 distinct fetched, the rest deferred). Set false to reject them instead (size and section_limit above 500, more than 20 accessions).",
+          "format": "string",
+          "isRequired": false,
+          "default": "true"
         }
       ],
       "transport": {
@@ -80,6 +115,41 @@
           "format": "string",
           "isRequired": false,
           "default": "info"
+        },
+        {
+          "name": "UNIPROT_BASE_URL",
+          "description": "UniProt REST base URL. Override for a private mirror or testing.",
+          "format": "string",
+          "isRequired": false,
+          "default": "https://rest.uniprot.org"
+        },
+        {
+          "name": "UNIPROT_TIMEOUT_MS",
+          "description": "Per-request HTTP timeout in milliseconds.",
+          "format": "string",
+          "isRequired": false,
+          "default": "30000"
+        },
+        {
+          "name": "UNIPROT_ID_MAPPING_BUDGET_MS",
+          "description": "Milliseconds uniprot_map_ids polls a mapping job inline before returning a resumable ticket. Keep it below UNIPROT_TIMEOUT_MS.",
+          "format": "string",
+          "isRequired": false,
+          "default": "8000"
+        },
+        {
+          "name": "UNIPROT_DEFAULT_PAGE_SIZE",
+          "description": "Page size (1–500) for search and proteome protein listing when the caller leaves size unset.",
+          "format": "string",
+          "isRequired": false,
+          "default": "25"
+        },
+        {
+          "name": "UNIPROT_CLAMP_LIMITS",
+          "description": "Serve an over-the-cap size at 500 with a notice, accept any section_limit, and accept up to 500 accessions on uniprot_get_entry (the first 20 distinct fetched, the rest deferred). Set false to reject them instead (size and section_limit above 500, more than 20 accessions).",
+          "format": "string",
+          "isRequired": false,
+          "default": "true"
         }
       ],
       "transport": {

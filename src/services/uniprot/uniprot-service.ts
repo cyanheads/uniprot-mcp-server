@@ -23,8 +23,10 @@ import type { RequestContext } from '@cyanheads/mcp-ts-core/utils';
 import { fetchWithTimeout, requestContextService, withRetry } from '@cyanheads/mcp-ts-core/utils';
 import { getServerConfig } from '@/config/server-config.js';
 import { proteomeQuery } from '@/services/uniprot/proteome-query.js';
+import { entryFieldsParam, searchFieldsParam } from '@/services/uniprot/return-fields.js';
 import type {
   Cofactor,
+  Comment,
   Disease,
   Entry,
   EvidencedText,
@@ -37,6 +39,7 @@ import type {
   IdMappingToDb,
   InactiveEntry,
   InactiveReason,
+  Interaction,
   Isoform,
   Keyword,
   Location,
@@ -49,29 +52,25 @@ import type {
   SearchPage,
   SequenceRecord,
   SequenceResult,
+  Site,
   Taxon,
   TaxonChild,
   TaxonChildrenPage,
   Variant,
 } from '@/services/uniprot/types.js';
-import {
-  DEFAULT_ENTRY_FIELDS,
-  DEFAULT_SEARCH_FIELDS,
-  describeInactive,
-  MANDATORY_ENTRY_FIELDS,
-  MANDATORY_SEARCH_FIELDS,
-  TAXON_CHILDREN_PAGE_SIZE,
-} from '@/services/uniprot/types.js';
+import { describeInactive, TAXON_CHILDREN_PAGE_SIZE } from '@/services/uniprot/types.js';
 
 /**
  * Framework `data` keys that carry raw upstream internals — `fetchWithTimeout`
  * attaches these to the status-mapped `McpError` it throws on any non-2xx /
- * timeout / network failure. The handler boundary copies `error.data` verbatim
- * onto `structuredContent.error.data`, so any one of these on an error that
- * reaches the client leaks internals (`responseBody` is up to 500 bytes of the
- * raw upstream error page; the rest expose status, internal request id, and the
- * internal operation label). Presence of any key flags a raw framework HTTP
- * error that must be re-thrown clean before it escapes the service.
+ * timeout / network failure. The handler boundary copies `error.data` onto
+ * `structuredContent.error.data`, so any one of these on an error that reaches
+ * the client leaks internals (status, internal request id, the internal
+ * operation label). The captured body is the exception: the framework keeps
+ * `body`/`responseBody` server-side unless a call sets `exposeErrorBody`, and
+ * `responseBody` stays listed as a marker of a raw framework HTTP error.
+ * Presence of any key flags one that must be re-thrown clean before it escapes
+ * the service.
  *
  * `url` is listed even though the framework stopped attaching it by default: a
  * UniProt request URL carries the caller's query verbatim, and the opt-in that
@@ -206,11 +205,124 @@ export function isCursorRejection(err: unknown): boolean {
   );
 }
 
-/** Strip evidence-reference parentheticals (e.g. `(PubMed:12345)`) for a clean snippet. */
+/** An evidence parenthetical: matched only at `(`, its body stopping at the next parenthesis. */
+const EVIDENCE_TAG = /\((?:PubMed|UniProtKB|Ref\.\d+|By similarity|Probable)[^()]*\)/g;
+
+/**
+ * Strip evidence-reference parentheticals (e.g. `(PubMed:12345)`) and the
+ * whitespace before each, for a clean snippet. One pass in time linear in the
+ * text: the whitespace is trimmed off the accumulated output rather than matched
+ * by the pattern.
+ */
 function stripEvidence(text: string): string {
-  return text
-    .replace(/\s*\((?:PubMed|UniProtKB|Ref\.\d+|By similarity|Probable)[^)]*\)/g, '')
-    .trim();
+  let out = '';
+  let last = 0;
+  for (const match of text.matchAll(EVIDENCE_TAG)) {
+    out += text.slice(last, match.index).trimEnd();
+    last = match.index + match[0].length;
+  }
+  return (out + text.slice(last)).trim();
+}
+
+/** Snippets of at most this many characters are returned whole; longer ones keep whole sentences within it. */
+const SNIPPET_TARGET_CHARS = 250;
+/** A first sentence past this many characters is cut at a word boundary and ends with `…`. */
+const SNIPPET_HARD_CHARS = 400;
+/** Abbreviations (lowercased, final period dropped) whose period never ends a sentence. */
+const ABBREVIATIONS = new Set([
+  'e.g',
+  'i.e',
+  'etc',
+  'approx',
+  'ca',
+  'cf',
+  'vs',
+  'al',
+  'fig',
+  'figs',
+  'sp',
+  'spp',
+  'resp',
+  'no',
+  'nos',
+  'ref',
+  'refs',
+  'incl',
+  'var',
+  'subsp',
+  'st',
+  'viz',
+  'ex',
+]);
+const isSpace = (c: string | undefined) => c === ' ' || c === '\n' || c === '\t' || c === '\r';
+const isUpper = (c: string | undefined) => c !== undefined && c >= 'A' && c <= 'Z';
+const isDigit = (c: string | undefined) => c !== undefined && c >= '0' && c <= '9';
+const isLetter = (c: string | undefined) =>
+  c !== undefined && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
+
+/**
+ * Sentence-end offsets (exclusive) within the first `SNIPPET_HARD_CHARS`
+ * characters: a `.` outside `(…)`/`[…]`, then whitespace, then an uppercase
+ * letter, a digit, or `(` — not after a listed abbreviation or a single capital
+ * (`S. Typhimurium`) standing as its own word; the tail of a symbol such as
+ * `IGF1R.`, `IL6ST.`, or `GPIb-IX-V.` still ends a sentence. One forward pass
+ * over a bounded prefix; the whitespace skip and the abbreviation lookback each
+ * read at most 8 characters.
+ */
+function sentenceEnds(text: string): number[] {
+  const ends: number[] = [];
+  let depth = 0;
+  const stop = Math.min(text.length, SNIPPET_HARD_CHARS);
+  for (let i = 0; i < stop; i++) {
+    const c = text[i];
+    if (c === '(' || c === '[') depth++;
+    else if ((c === ')' || c === ']') && depth > 0) depth--;
+    else if (c === '.' && depth === 0 && isSpace(text[i + 1])) {
+      let j = i + 1;
+      while (j < text.length && j - i <= 8 && isSpace(text[j])) j++;
+      const next = text[j];
+      if (!(isUpper(next) || isDigit(next) || next === '(')) continue;
+      let k = i - 1;
+      while (k >= 0 && i - k <= 8 && (isLetter(text[k]) || text[k] === '.')) k--;
+      const token = text.slice(k + 1, i);
+      const glued = k >= 0 && (isDigit(text[k]) || text[k] === '-');
+      if (
+        !glued &&
+        (ABBREVIATIONS.has(token.toLowerCase()) || (token.length === 1 && isUpper(token)))
+      )
+        continue;
+      ends.push(i + 1);
+    }
+  }
+  return ends;
+}
+
+/**
+ * The bounded opening of a stripped FUNCTION text: the text whole when it is at
+ * most `SNIPPET_TARGET_CHARS`; otherwise whole sentences while within that
+ * target, at least the first. A first sentence over `SNIPPET_HARD_CHARS` (or no
+ * sentence end within it, on a longer text) is cut at the last whitespace at or
+ * before that character, trailing `,`/`;`/`:` dropped, and ends with `…`.
+ * At most `SNIPPET_HARD_CHARS + 1` characters.
+ */
+function boundedSnippet(text: string): string {
+  if (text.length <= SNIPPET_TARGET_CHARS) return text;
+  const ends = sentenceEnds(text);
+  const first = ends[0];
+  if (first === undefined) {
+    if (text.length <= SNIPPET_HARD_CHARS) return text;
+    let cut = SNIPPET_HARD_CHARS;
+    while (cut > 0 && !isSpace(text[cut])) cut--;
+    if (cut === 0) cut = SNIPPET_HARD_CHARS;
+    while (cut > 0 && (isSpace(text[cut - 1]) || ',;:'.includes(text[cut - 1] as string))) cut--;
+    return `${text.slice(0, cut)}…`;
+  }
+  let end = first;
+  for (const e of ends) {
+    if (e > SNIPPET_TARGET_CHARS) break;
+    end = e;
+  }
+  return text.slice(0, end).trim();
 }
 
 /** Collect PubMed/source evidence ids from an evidences[] array. */
@@ -229,6 +341,15 @@ type RawValue = { value: string };
 type RawComment = {
   commentType: string;
   texts?: RawText[];
+  molecule?: string;
+  note?: { texts?: RawText[] };
+  /** A side recorded for one product of a polyprotein carries its `chainId` (`PRO_…`). */
+  interactions?: {
+    interactantOne?: { uniProtKBAccession?: string; chainId?: string };
+    interactantTwo: { uniProtKBAccession: string; geneName?: string; chainId?: string };
+    numberOfExperiments: number;
+    organismDiffer?: boolean;
+  }[];
   reaction?: {
     name: string;
     ecNumber?: string;
@@ -240,13 +361,14 @@ type RawComment = {
     cofactorCrossReference?: { database: string; id: string };
   }[];
   subcellularLocations?: { location: RawText; topology?: RawText }[];
+  /** `null` on a DISEASE comment that carries only a note. */
   disease?: {
     diseaseId?: string;
     diseaseAccession?: string;
     acronym?: string;
     description?: string;
     diseaseCrossReference?: { database: string; id: string };
-  };
+  } | null;
   events?: string[];
   isoforms?: {
     name?: RawValue;
@@ -263,6 +385,9 @@ type RawFeature = {
   featureId?: string;
   evidences?: RawEvidence[];
   alternativeSequence?: { originalSequence?: string; alternativeSequences?: string[] };
+  /** On a binding site; `id` is `ChEBI:CHEBI:n`, absent for a ligand ChEBI does not cover. */
+  ligand?: { name: string; id?: string; label?: string; note?: string };
+  ligandPart?: { name: string; id?: string };
 };
 
 type RawCrossRef = {
@@ -311,10 +436,16 @@ type RawEntry = RawInactiveFields & {
   proteinExistence?: string;
   sequence?: { length: number };
   proteinDescription?: {
-    recommendedName?: { fullName?: RawValue };
+    recommendedName?: { fullName?: RawValue; ecNumbers?: RawValue[] };
+    alternativeNames?: { fullName?: RawValue }[];
     submissionNames?: { fullName?: RawValue }[];
   };
-  genes?: { geneName?: RawValue; synonyms?: RawValue[] }[];
+  genes?: {
+    geneName?: RawValue;
+    synonyms?: RawValue[];
+    orderedLocusNames?: RawValue[];
+    orfNames?: RawValue[];
+  }[];
   organism?: { scientificName: string; commonName?: string; taxonId: number };
   comments?: RawComment[];
   features?: RawFeature[];
@@ -404,7 +535,7 @@ export class UniProtService {
   ): Promise<SearchPage> {
     const url = new URL(`${this.baseUrl}/uniprotkb/search`);
     url.searchParams.set('query', query);
-    url.searchParams.set('fields', this.searchFields(opts.fields));
+    url.searchParams.set('fields', searchFieldsParam(opts.fields));
     url.searchParams.set('format', 'json');
     url.searchParams.set('size', String(opts.size ?? getServerConfig().defaultPageSize));
     if (opts.facets) url.searchParams.set('facets', opts.facets);
@@ -439,25 +570,6 @@ export class UniProtService {
     };
   }
 
-  /**
-   * Resolve the upstream `fields` for a search. A caller-supplied `fields` trims
-   * the projection but always carries the mandatory identity/provenance columns
-   * the required `ProteinHit` output schema demands — UniProt omits `id`,
-   * `length`, organism, score, and existence unless explicitly requested, so
-   * without this a custom `fields` (e.g. "accession,gene_names") would crash on
-   * the missing `entryName` or fabricate provenance. Returns the default set when
-   * none is given. Mirrors `entryFields()`.
-   */
-  private searchFields(fields: string | undefined): string {
-    if (!fields) return DEFAULT_SEARCH_FIELDS;
-    const requested = fields
-      .split(',')
-      .map((f) => f.trim())
-      .filter(Boolean);
-    const merged = new Set<string>([...MANDATORY_SEARCH_FIELDS, ...requested]);
-    return [...merged].join(',');
-  }
-
   // ---------------------------------------------------------------------------
   // UniProtKB entries (batch)
   // ---------------------------------------------------------------------------
@@ -477,7 +589,7 @@ export class UniProtService {
   ): Promise<{ entries: Entry[]; inactive: InactiveEntry[] }> {
     const url = new URL(`${this.baseUrl}/uniprotkb/search`);
     url.searchParams.set('query', `accession:(${accessions.join(' OR ')})`);
-    url.searchParams.set('fields', this.entryFields(fields));
+    url.searchParams.set('fields', entryFieldsParam(fields));
     url.searchParams.set('format', 'json');
     url.searchParams.set('size', String(accessions.length));
 
@@ -494,23 +606,6 @@ export class UniProtService {
       else entries.push(this.normalizeEntry(raw));
     }
     return { entries, inactive };
-  }
-
-  /**
-   * Resolve the upstream `fields` for an entry fetch. A caller-supplied `fields`
-   * trims sections but always carries the mandatory identity/provenance columns
-   * the required output schema demands — UniProt omits `id`, `length`, score,
-   * existence, and organism unless explicitly requested, so without this a custom
-   * `fields` would crash on the missing `entryName` or fabricate provenance.
-   */
-  private entryFields(fields: string | undefined): string {
-    if (!fields) return DEFAULT_ENTRY_FIELDS;
-    const requested = fields
-      .split(',')
-      .map((f) => f.trim())
-      .filter(Boolean);
-    const merged = new Set<string>([...MANDATORY_ENTRY_FIELDS, ...requested]);
-    return [...merged].join(',');
   }
 
   // ---------------------------------------------------------------------------
@@ -1211,11 +1306,17 @@ export class UniProtService {
     };
   }
 
+  /** Every name of every gene, in UniProt's order: name, synonyms, ordered-locus names, ORF names. */
   private geneNames(raw: RawEntry): string[] {
     const names: string[] = [];
     for (const g of raw.genes ?? []) {
-      if (g.geneName?.value) names.push(g.geneName.value);
-      for (const s of g.synonyms ?? []) if (s.value) names.push(s.value);
+      for (const n of [
+        g.geneName,
+        ...(g.synonyms ?? []),
+        ...(g.orderedLocusNames ?? []),
+        ...(g.orfNames ?? []),
+      ])
+        if (n?.value) names.push(n.value);
     }
     return names;
   }
@@ -1230,7 +1331,7 @@ export class UniProtService {
   private firstFunctionSnippet(raw: RawEntry): string | undefined {
     const fn = raw.comments?.find((c) => c.commentType === 'FUNCTION');
     const text = fn?.texts?.[0]?.value;
-    return text ? stripEvidence(text) : undefined;
+    return text ? boundedSnippet(stripEvidence(text)) : undefined;
   }
 
   private normalizeHit(raw: RawEntry): ProteinHit {
@@ -1305,6 +1406,7 @@ export class UniProtService {
         if (!d) return [];
         const omim =
           d.diseaseCrossReference?.database === 'MIM' ? d.diseaseCrossReference.id : undefined;
+        const note = noteText(c);
         return [
           {
             name: d.diseaseId ?? 'Unnamed disease',
@@ -1312,32 +1414,67 @@ export class UniProtService {
             ...(d.acronym ? { acronym: d.acronym } : {}),
             ...(d.description ? { description: d.description } : {}),
             ...(omim ? { omimId: omim } : {}),
+            ...(note ? { note } : {}),
           },
         ];
       });
 
-    const ptmTypes = new Set([
-      'Modified residue',
-      'Glycosylation',
-      'Lipidation',
-      'Cross-link',
-      'Disulfide bond',
-    ]);
-    const ptms = features.filter((f) => ptmTypes.has(f.type)).map((f) => normalizeFeature(f));
+    // A DISEASE comment that names no disease carries only a note: it is free text, filed
+    // under comments so disease[].name stays a real disease name.
+    const freeText = comments.flatMap<Comment>((c) => {
+      const texts =
+        c.commentType === 'DISEASE'
+          ? c.disease
+            ? []
+            : (c.note?.texts ?? [])
+          : FREE_TEXT_COMMENT_TYPES.has(c.commentType)
+            ? (c.texts ?? [])
+            : [];
+      return texts.map((t) => {
+        const evidence = collectEvidence(t.evidences);
+        return {
+          type: c.commentType,
+          value: t.value,
+          ...(evidence ? { evidence } : {}),
+          ...(c.molecule ? { molecule: c.molecule } : {}),
+        };
+      });
+    });
 
-    const domainTypes = new Set([
-      'Domain',
-      'Region',
-      'Repeat',
-      'Motif',
-      'Zinc finger',
-      'DNA-binding region',
-    ]);
-    const domains = features.filter((f) => domainTypes.has(f.type)).map((f) => normalizeFeature(f));
+    const interactions = comments
+      .filter((c) => c.commentType === 'INTERACTION')
+      .flatMap((c) => c.interactions ?? [])
+      .map<Interaction>((i) => {
+        const { uniProtKBAccession: one, chainId: chain } = i.interactantOne ?? {};
+        const { uniProtKBAccession: partner, geneName, chainId: partnerChain } = i.interactantTwo;
+        return {
+          partner,
+          ...(partnerChain ? { partnerChain } : {}),
+          // UniProt writes "-" for a partner with no gene name.
+          ...(geneName && geneName !== '-' ? { gene: geneName } : {}),
+          experiments: i.numberOfExperiments,
+          ...(i.organismDiffer ? { organismDiffer: true } : {}),
+          ...(one && one !== raw.primaryAccession ? { isoform: one } : {}),
+          ...(chain ? { chain } : {}),
+        };
+      });
 
-    const variants = features
-      .filter((f) => f.type === 'Natural variant')
-      .map((f) => normalizeVariant(f));
+    const ofTypes = <T>(types: ReadonlySet<string>, normalize: (f: RawFeature) => T) =>
+      features.filter((f) => types.has(f.type)).map((f) => normalize(f));
+    const ptms = ofTypes(PTM_TYPES, normalizeFeature);
+    const domains = ofTypes(DOMAIN_TYPES, normalizeFeature);
+    const processing = ofTypes(PROCESSING_TYPES, normalizeFeature);
+    const topology = ofTypes(TOPOLOGY_TYPES, normalizeFeature);
+    const sites = ofTypes(SITE_TYPES, normalizeSite);
+    const variants = ofTypes(VARIANT_TYPES, normalizeVariant);
+    const mutagenesis = ofTypes(MUTAGENESIS_TYPES, normalizeVariant);
+
+    const ecNumbers = (raw.proteinDescription?.recommendedName?.ecNumbers ?? []).map(
+      (ec) => ec.value,
+    );
+    const alternativeNames = (raw.proteinDescription?.alternativeNames ?? []).flatMap((n) =>
+      n.fullName?.value ? [n.fullName.value] : [],
+    );
 
     const isoforms = comments
       .filter((c) => c.commentType === 'ALTERNATIVE PRODUCTS')
@@ -1354,8 +1491,19 @@ export class UniProtService {
       .map<GoTerm>((x) => {
         const term = x.properties?.find((p) => p.key === 'GoTerm')?.value ?? '';
         const aspect = term.slice(0, 1);
-        return { id: x.id, term: term.slice(2), aspect };
+        const evidenceType = x.properties?.find((p) => p.key === 'GoEvidenceType')?.value;
+        return { id: x.id, term: term.slice(2), aspect, ...(evidenceType ? { evidenceType } : {}) };
       });
+
+    const ensemblGenes = [
+      ...new Set(
+        xrefList.flatMap((x) =>
+          x.database === 'Ensembl'
+            ? (x.properties ?? []).filter((p) => p.key === 'GeneId').map((p) => p.value)
+            : [],
+        ),
+      ),
+    ];
 
     const keywords = (raw.keywords ?? []).map<Keyword>((k) => ({
       id: k.id,
@@ -1363,37 +1511,52 @@ export class UniProtService {
       ...(k.category ? { category: k.category } : {}),
     }));
 
-    const xrefDatabases = ['PDB', 'Ensembl', 'RefSeq', 'ChEMBL', 'AlphaFoldDB'];
-    const xrefs: Record<string, string[]> = {};
+    // Every database the projection fetched, except GO, which goTerms carries. Keyed through a
+    // Map: database names come from upstream, and a `{}` literal resolves `constructor` to its prototype.
+    const xrefIds = new Map<string, string[]>();
     for (const x of xrefList) {
-      if (!xrefDatabases.includes(x.database)) continue;
-      const bucket = xrefs[x.database] ?? [];
-      bucket.push(x.id);
-      xrefs[x.database] = bucket;
+      if (x.database === 'GO') continue;
+      const ids = xrefIds.get(x.database);
+      if (ids) ids.push(x.id);
+      else xrefIds.set(x.database, [x.id]);
     }
+    const xrefs = Object.fromEntries(xrefIds);
+
+    // An entry name is ACCESSION-or-mnemonic plus "_" plus the species code (P53_HUMAN).
+    const nameSplit = raw.uniProtkbId.lastIndexOf('_');
+    const mnemonic = nameSplit > 0 ? raw.uniProtkbId.slice(nameSplit + 1) : '';
 
     return {
       accession: raw.primaryAccession,
       entryName: raw.uniProtkbId,
       ...(proteinName ? { proteinName } : {}),
+      ...(alternativeNames.length ? { alternativeNames } : {}),
       genes: this.geneNames(raw),
-      organism: this.normalizeOrganism(raw.organism),
+      organism: { ...this.normalizeOrganism(raw.organism), ...(mnemonic ? { mnemonic } : {}) },
       length: raw.sequence?.length ?? 0,
       reviewed: raw.entryType === 'UniProtKB reviewed (Swiss-Prot)',
       annotationScore: raw.annotationScore ?? 0,
       proteinExistence: raw.proteinExistence ?? 'unknown',
+      ...(ecNumbers.length ? { ecNumbers } : {}),
       ...(fn.length ? { function: fn } : {}),
       ...(catalytic.length ? { catalyticActivity: catalytic } : {}),
       ...(cofactors.length ? { cofactors } : {}),
+      ...(sites.length ? { sites } : {}),
       ...(subcellularLocation.length ? { subcellularLocation } : {}),
+      ...(topology.length ? { topology } : {}),
       ...(disease.length ? { disease } : {}),
       ...(ptms.length ? { ptms } : {}),
+      ...(processing.length ? { processing } : {}),
       ...(variants.length ? { variants } : {}),
+      ...(mutagenesis.length ? { mutagenesis } : {}),
       ...(isoforms.length ? { isoforms } : {}),
       ...(domains.length ? { domains } : {}),
+      ...(freeText.length ? { comments: freeText } : {}),
+      ...(interactions.length ? { interactions } : {}),
       ...(goTerms.length ? { goTerms } : {}),
       ...(keywords.length ? { keywords } : {}),
       ...(Object.keys(xrefs).length ? { xrefs } : {}),
+      ...(ensemblGenes.length ? { ensemblGenes } : {}),
     };
   }
 }
@@ -1558,9 +1721,99 @@ function normalizeFeature(raw: RawFeature): Feature {
   };
 }
 
+/** UniProt feature types by the entry section that renders them. */
+const PTM_TYPES: ReadonlySet<string> = new Set([
+  'Modified residue',
+  'Glycosylation',
+  'Lipidation',
+  'Cross-link',
+  'Disulfide bond',
+]);
+const DOMAIN_TYPES: ReadonlySet<string> = new Set([
+  'Domain',
+  'Region',
+  'Repeat',
+  'Motif',
+  'Zinc finger',
+  'DNA binding',
+  'Coiled coil',
+]);
+const SITE_TYPES: ReadonlySet<string> = new Set(['Active site', 'Binding site', 'Site']);
+const PROCESSING_TYPES: ReadonlySet<string> = new Set([
+  'Signal',
+  'Transit peptide',
+  'Propeptide',
+  'Chain',
+  'Peptide',
+  'Initiator methionine',
+]);
+const TOPOLOGY_TYPES: ReadonlySet<string> = new Set([
+  'Topological domain',
+  'Transmembrane',
+  'Intramembrane',
+]);
+const VARIANT_TYPES: ReadonlySet<string> = new Set(['Natural variant']);
+const MUTAGENESIS_TYPES: ReadonlySet<string> = new Set(['Mutagenesis']);
+
+/** Comment types whose content is free text (`texts[]`), rendered one row per text under `comments`. */
+const FREE_TEXT_COMMENT_TYPES: ReadonlySet<string> = new Set([
+  'ACTIVITY REGULATION',
+  'ALLERGEN',
+  'BIOTECHNOLOGY',
+  'CAUTION',
+  'DEVELOPMENTAL STAGE',
+  'DISRUPTION PHENOTYPE',
+  'DOMAIN',
+  'INDUCTION',
+  'MISCELLANEOUS',
+  'PATHWAY',
+  'PHARMACEUTICAL',
+  'POLYMORPHISM',
+  'PTM',
+  'SIMILARITY',
+  'SUBUNIT',
+  'TISSUE SPECIFICITY',
+  'TOXIC DOSE',
+]);
+
+/** A comment's note texts joined, or undefined when it has none. */
+function noteText(comment: RawComment): string | undefined {
+  const text = (comment.note?.texts ?? []).map((t) => t.value).join(' ');
+  return text || undefined;
+}
+
+/** `ChEBI:CHEBI:29108` → `CHEBI:29108`; undefined for any other namespace or no id. */
+function chebiId(id: string | undefined): string | undefined {
+  return id?.startsWith('ChEBI:') ? id.slice('ChEBI:'.length) : undefined;
+}
+
+function normalizeSite(raw: RawFeature): Site {
+  const ligand = raw.ligand;
+  const part = raw.ligandPart;
+  const ligandChebi = chebiId(ligand?.id);
+  const partChebi = chebiId(part?.id);
+  return {
+    ...normalizeFeature(raw),
+    ...(ligand
+      ? {
+          ligand: {
+            name: ligand.name,
+            ...(ligandChebi ? { chebiId: ligandChebi } : {}),
+            ...(ligand.label ? { label: ligand.label } : {}),
+            ...(ligand.note ? { note: ligand.note } : {}),
+          },
+        }
+      : {}),
+    ...(part
+      ? { ligandPart: { name: part.name, ...(partChebi ? { chebiId: partChebi } : {}) } }
+      : {}),
+  };
+}
+
 function normalizeVariant(raw: RawFeature): Variant {
   const original = raw.alternativeSequence?.originalSequence;
-  const variation = raw.alternativeSequence?.alternativeSequences?.[0];
+  // A mutagenesis can test several substitutions at one position (UniProt "L->A,P"); keep them all.
+  const variation = raw.alternativeSequence?.alternativeSequences?.join(',');
   return {
     ...(raw.description ? { description: raw.description } : {}),
     location: {

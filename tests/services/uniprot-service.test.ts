@@ -16,6 +16,10 @@
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import p00533Sections from '../fixtures/p00533-sections.json' with { type: 'json' };
+import p04637Sections from '../fixtures/p04637-sections.json' with { type: 'json' };
+import p07477Default from '../fixtures/p07477-default.json' with { type: 'json' };
+import sectionRows from '../fixtures/section-rows.json' with { type: 'json' };
 import {
   activeRawEntry,
   expectMcpError,
@@ -24,6 +28,7 @@ import {
   RAW_HUMAN_PROTEOME,
   RAW_SEARCH_FACETS,
   rejectUnmockedFetch,
+  required,
   UNIPROT_400_BODIES,
   upstreamResponse,
 } from '../helpers.js';
@@ -656,6 +661,194 @@ describe('UniProtService — search parsing', () => {
   });
 });
 
+describe('UniProtService — bounded function snippet (#36)', () => {
+  /** Search one page whose hits carry these first FUNCTION texts, in order; return each hit's snippet. */
+  async function snippets(...texts: string[]): Promise<(string | undefined)[]> {
+    fetchWithTimeoutMock.mockResolvedValue(
+      jsonResponse({
+        results: texts.map((value, i) => ({
+          primaryAccession: `P${10_000 + i}`,
+          uniProtkbId: `T${i}_HUMAN`,
+          entryType: 'UniProtKB reviewed (Swiss-Prot)',
+          sequence: { length: 100 },
+          organism: { scientificName: 'Homo sapiens', taxonId: 9606 },
+          comments: [{ commentType: 'FUNCTION', texts: [{ value }] }],
+        })),
+      }),
+    );
+    const page = await service.search('x', {}, ctx());
+    return page.results.map((hit) => hit.functionSnippet);
+  }
+
+  /** Runs the sentence it follows past 250 characters, so only what precedes that sentence qualifies. */
+  const LONG_TAIL = ` ${'continues with '.repeat(20)}more. Next sentence.`;
+
+  it('returns a stripped first FUNCTION text of at most 250 characters whole', async () => {
+    const text = `Acts as a kinase. Binds ATP. ${'Phosphorylates substrates. '.repeat(7)}Ends here`;
+    expect(text.length).toBeLessThanOrEqual(250);
+    const exactly250 = `Acts as a kinase. ${'x'.repeat(232)}`;
+    expect(exactly250).toHaveLength(250);
+    expect(await snippets(text, exactly250)).toEqual([text, exactly250]);
+  });
+
+  it('returns whole sentences while the snippet stays within 250 characters', async () => {
+    const sentence = (n: number) => `Sentence ${n} ${'y'.repeat(88)}.`;
+    expect(sentence(1)).toHaveLength(100);
+    const text = `${sentence(1)} ${sentence(2)} ${sentence(3)}`;
+    expect(await snippets(text)).toEqual([`${sentence(1)} ${sentence(2)}`]);
+  });
+
+  it('returns a first sentence of 251 to 400 characters whole, even past 250', async () => {
+    const first = `Mediates ${'z'.repeat(290)}.`;
+    expect(first).toHaveLength(300);
+    expect(await snippets(`${first} Then more text follows.`)).toEqual([first]);
+  });
+
+  it('returns a single sentence of at most 400 characters with no end inside it whole', async () => {
+    const text = `Mediates ${'z'.repeat(300)} without a sentence end`;
+    expect(text.length).toBeLessThanOrEqual(400);
+    expect(await snippets(text)).toEqual([text]);
+  });
+
+  it.each([
+    [
+      'cuts at the last space within 400 and drops a trailing comma',
+      `${'x'.repeat(397)}, ${'z'.repeat(60)}. Next sentence.`,
+      `${'x'.repeat(397)}…`,
+    ],
+    [
+      'drops a trailing semicolon or colon the same way',
+      `${'x'.repeat(390)}; a: ${'z'.repeat(60)}. Next sentence.`,
+      `${'x'.repeat(390)}; a…`,
+    ],
+    [
+      'cuts at a space at character 400 to the 401-character maximum',
+      `${'x'.repeat(400)} ${'z'.repeat(60)}. Next sentence.`,
+      `${'x'.repeat(400)}…`,
+    ],
+    [
+      'cuts a 400-character run with no space at 400',
+      `${'x'.repeat(500)}. Next sentence.`,
+      `${'x'.repeat(400)}…`,
+    ],
+  ])('a first sentence over 400 characters %s', async (_case, text, expected) => {
+    const [snippet] = await snippets(text);
+    expect(snippet).toBe(expected);
+    expect(snippet?.length).toBeLessThanOrEqual(401);
+  });
+
+  it.each([
+    ['Requires Mg(2+).', ' Binds substrate'],
+    ['(Microbial infection) Acts as a receptor for HCV.', ' Mediates entry'],
+    ['Binds 2 Zn(2+) ions per subunit.', " 2',3'-cGAMP is a product"],
+    ['Activates the kinase.', ' (In vitro) Binds Y'],
+    ['Binds divalent cations (e.g. Ca(2+), Mg(2+)).', ' Required for X'],
+    ['Apo(a) is the main constituent of lipoprotein(a) (Lp(a)).', ' It has activity'],
+    ['Cleaves after Arg (EC 3.4.21.4) in substrates.', ' Next sentence'],
+    ['Cleaves at EC 3.4.21.4 sites in substrates.', ' Next sentence'],
+    ['Hydrolyzes peptides, e.g. Leu-enkephalin.', ' Also cleaves X'],
+    ['Converts substrate i.e. ATP to ADP.', ' Next sentence'],
+    ['Uses ATP, GTP, etc. Other nucleotides are poor substrates.', ' Next sentence'],
+    ['Retains approx. 30% of wild-type activity.', ' Required for Y'],
+    ['Binds ca. 2 ions per subunit.', ' Next sentence'],
+    ['Resembles the cf. Smith model.', ' Next sentence'],
+    ['Acts vs. Gram-negative bacteria.', ' Next sentence'],
+    ['Reported by Smith et al. In vitro it binds zinc.', ' Next sentence'],
+    ['Isolated from Bacillus sp. Strain 168 produces it.', ' Next sentence'],
+    ['Found in Streptomyces spp. Most strains secrete it.', ' Next sentence'],
+    ['Binds copper and zinc, resp. Both are required.', ' Next sentence'],
+    ['Acts on S. Typhimurium effectors.', ' Next sentence'],
+    ['Protein kinase. cAMP-dependent activation follows.', ' Next sentence'],
+    ['Signals with insulin-like growth factor I receptor/IGF1R.', ' Mediates uptake'],
+    ['Signal activation necessitates an association with IL6ST.', ' Activation leads to X'],
+    ['Binds the platelet-surface receptor complex GPIb-IX-V.', ' Also binds collagen'],
+    ['Forms a complex with ARID5B.', ' Mediates demethylation'],
+  ])('ends the first sentence of %j where it ends', async (first, rest) => {
+    expect(await snippets(`${first}${rest}${LONG_TAIL}`)).toEqual([first]);
+  });
+
+  /** Carries a first sentence past 250 characters with no period of its own. */
+  const FILLER = ' and related substrates'.repeat(10);
+
+  it.each([
+    ['e.g.', `Hydrolyzes peptides, e.g. Leu-enkephalin,${FILLER}.`],
+    ['a decimal EC number', `Cleaves after Arg in EC 3.4.21.4 sites${FILLER}.`],
+    ['a single capital initial', `Acts on S. Typhimurium effectors${FILLER}.`],
+    ['a period inside parentheses', `Binds divalent cations (e.g. Ca(2+). Mg(2+))${FILLER}.`],
+  ])('keeps a first sentence past 250 characters whole across %s', async (_case, first) => {
+    // Only a sentence past 250 characters shows a false end inside it: one within 250 is extended past it.
+    expect(first.length).toBeGreaterThan(250);
+    expect(first.length).toBeLessThanOrEqual(400);
+    expect(await snippets(`${first} Next sentence.`)).toEqual([first]);
+  });
+
+  it.each([
+    [
+      'a 250-character text with an inner sentence end is returned whole',
+      `Acts as a kinase. Binds ${'x'.repeat(226)}`,
+      250,
+      `Acts as a kinase. Binds ${'x'.repeat(226)}`,
+    ],
+    [
+      'a 251-character text is cut to its whole sentences',
+      `Acts as a kinase. Binds ${'x'.repeat(227)}`,
+      251,
+      'Acts as a kinase.',
+    ],
+    [
+      'a sentence ending exactly at character 250 is kept',
+      `Sentence one ${'y'.repeat(85)}. Sentence two ${'z'.repeat(136)}. Then more text follows.`,
+      274,
+      `Sentence one ${'y'.repeat(85)}. Sentence two ${'z'.repeat(136)}.`,
+    ],
+    [
+      'a 400-character first sentence is kept whole, with no ellipsis',
+      `Mediates ${'z'.repeat(390)}. Then more text follows.`,
+      424,
+      `Mediates ${'z'.repeat(390)}.`,
+    ],
+    [
+      'a 400-character text with no sentence end is returned whole',
+      `Mediates ${'z'.repeat(300)} ${'w'.repeat(90)}`,
+      400,
+      `Mediates ${'z'.repeat(300)} ${'w'.repeat(90)}`,
+    ],
+  ])('pins the snippet bounds: %s', async (_case, text, length, expected) => {
+    expect(text).toHaveLength(length);
+    expect(await snippets(text)).toEqual([expected]);
+  });
+
+  it('strips every evidence tag kind and the whitespace before it, keeping other parentheticals', async () => {
+    expect(
+      await snippets(
+        'Acts as a tumor suppressor (PubMed:11025664).',
+        'Binds ligands (PubMed:10805725, PubMed:12297050). Includes EGF (By similarity). A role (Probable) in X (UniProtKB:P12345). Seen (Ref.3) here',
+        'Binds DNA  \n (PubMed:1). Binds Ca(2+) (in vitro) as well',
+        '(PubMed:1) Binds DNA.',
+        'Binds DNA (PubMed:1',
+        'Binds DNA (PubMed:1 (see text)) as shown',
+      ),
+    ).toEqual([
+      'Acts as a tumor suppressor.',
+      'Binds ligands. Includes EGF. A role in X. Seen here',
+      'Binds DNA. Binds Ca(2+) (in vitro) as well',
+      'Binds DNA.',
+      'Binds DNA (PubMed:1',
+      'Binds DNA (PubMed:1 (see text)) as shown',
+    ]);
+  });
+
+  it('strips evidence before sizing the snippet', async () => {
+    const first = `Mediates ${'z'.repeat(230)}`;
+    const tagged = `${first} (PubMed:12345678, PubMed:23456789, PubMed:34567890). Next ${'w'.repeat(200)}.`;
+    expect(await snippets(tagged)).toEqual([`${first}.`]);
+  });
+
+  it('omits the snippet when the FUNCTION text is only evidence', async () => {
+    expect(await snippets('(By similarity)')).toEqual([undefined]);
+  });
+});
+
 describe('UniProtService — taxonomy children page', () => {
   const link = (cursor: string) =>
     `<https://rest.uniprot.org/taxonomy/search?format=json&query=parent%3A1883&cursor=${cursor}&size=100>; rel="next"`;
@@ -913,6 +1106,22 @@ describe('UniProtService — getEntries batch', () => {
     expect(fieldSet).toContain('protein_existence');
     // The caller's requested section field survives the merge.
     expect(fieldSet).toContain('cc_function');
+  });
+
+  it("hands the caller's abort signal to the batch fetch", async () => {
+    fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: [] }));
+    const controller = new AbortController();
+
+    await service.getEntries(
+      ['P04637'],
+      undefined,
+      createMockContext({ signal: controller.signal }),
+    );
+
+    expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(1);
+    const [, , , options] = required(fetchWithTimeoutMock.mock.calls[0], 'the batch fetch call');
+    // Identity, not equality: every AbortSignal deep-equals every other.
+    expect((options as { signal?: AbortSignal }).signal).toBe(controller.signal);
   });
 });
 
@@ -1357,12 +1566,19 @@ describe('UniProtService — full entry normalization', () => {
         accession: 'P00439',
         entryName: 'PH4H_HUMAN',
         proteinName: 'Phenylalanine-4-hydroxylase',
+        alternativeNames: ['Phe-4-monooxygenase'],
         genes: ['PAH'],
-        organism: { scientificName: 'Homo sapiens', commonName: 'Human', taxonId: 9606 },
+        organism: {
+          scientificName: 'Homo sapiens',
+          commonName: 'Human',
+          taxonId: 9606,
+          mnemonic: 'HUMAN',
+        },
         length: 452,
         reviewed: true,
         annotationScore: 5,
         proteinExistence: '1: Evidence at protein level',
+        ecNumbers: ['1.14.16.1'],
         function: [
           {
             value: 'Catalyzes the hydroxylation of L-phenylalanine to L-tyrosine',
@@ -1417,8 +1633,8 @@ describe('UniProtService — full entry normalization', () => {
         ],
         domains: [{ type: 'Domain', description: 'ACT', location: { start: 36, end: 114 } }],
         goTerms: [
-          { id: 'GO:0005829', term: 'cytosol', aspect: 'C' },
-          { id: 'GO:0005506', term: 'iron ion binding', aspect: 'F' },
+          { id: 'GO:0005829', term: 'cytosol', aspect: 'C', evidenceType: 'TAS:Reactome' },
+          { id: 'GO:0005506', term: 'iron ion binding', aspect: 'F', evidenceType: 'IEA:InterPro' },
         ],
         keywords: [
           { id: 'KW-0002', name: '3D-structure', category: 'Technical term' },
@@ -1430,11 +1646,12 @@ describe('UniProtService — full entry normalization', () => {
           ChEMBL: ['CHEMBL3076'],
           Ensembl: ['ENST00000553106.6'],
         },
+        ensemblGenes: ['ENSG00000171759.11'],
       },
     ]);
   });
 
-  it('keeps synonyms, isoforms, and locations, and drops a DISEASE comment that holds only a note', async () => {
+  it('keeps synonyms, isoforms, and locations, and files a DISEASE comment that holds only a note under comments', async () => {
     fetchWithTimeoutMock.mockResolvedValue(
       jsonResponse({ results: [RAW_ENTRIES.p53, RAW_ENTRIES.rhodopsin] }),
     );
@@ -1455,6 +1672,13 @@ describe('UniProtService — full entry normalization', () => {
         acronym: 'ESCR',
         description: 'A malignancy of the esophagus.',
         omimId: '133239',
+        note: 'The disease is caused by variants affecting the gene represented in this entry',
+      },
+    ]);
+    expect(p53?.comments).toEqual([
+      {
+        type: 'DISEASE',
+        value: 'TP53 is found in increased amounts in a wide variety of transformed cells',
       },
     ]);
     expect(p53?.domains).toEqual([
@@ -1504,6 +1728,500 @@ describe('UniProtService — full entry normalization', () => {
       { type: 'Disulfide bond', location: { start: 95, end: 100 } },
     ]);
     expect(entries[0]?.ptms?.[1]).not.toHaveProperty('description');
+  });
+});
+
+/**
+ * Fixtures captured from rest.uniprot.org (release 2026_04, 2026-11-17); every
+ * object keeps the shape UniProt sent, and only lists are cut.
+ *
+ * - `p07477-default.json`: P07477 (TRY1_HUMAN) as the default entry projection returns it.
+ * - `p04637-sections.json`: P04637 with its 9 DISEASE comments, 1 MISCELLANEOUS comment, 6 of
+ *   its 187 interaction rows (both whose interactantOne is an isoform), its DNA-binding
+ *   region, 2 of its GO terms, and all 22 Ensembl transcripts.
+ * - `p00533-sections.json`: P00533 with its membrane topology, ACTIVITY REGULATION comment,
+ *   and the first 25 of its 200 interaction rows.
+ * - `section-rows.json`: single rows — P69905's heme binding site with a ligand part,
+ *   P07477's Tyr-154 mutagenesis, and the rows of P29972 (topology), P01308 and P00505
+ *   (processing), P00327 (labelled ligands), P0A7V8 and P34110 (gene_names).
+ */
+describe('UniProtService — sites, processing, topology, comments, and interactions', () => {
+  const p07477 = required(p07477Default.results[0], 'the P07477 fixture row');
+  const p04637 = required(p04637Sections.results[0], 'the P04637 fixture row');
+  const p00533 = required(p00533Sections.results[0], 'the P00533 fixture row');
+
+  /** Normalize raw rows as the batch search returns them. */
+  async function normalize(...rows: object[]) {
+    fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: rows }));
+    return (await service.getEntries(['P00000'], undefined, ctx())).entries;
+  }
+
+  it('files active, binding, and other sites under sites, each binding site with its ligand', async () => {
+    const [entry] = await normalize(p07477);
+    const calcium = { name: 'Ca(2+)', chebiId: 'CHEBI:29108' };
+    const charge = (start: number) => ({
+      type: 'Active site',
+      description: 'Charge relay system',
+      location: { start, end: start },
+    });
+    const binding = (start: number) => ({
+      type: 'Binding site',
+      location: { start, end: start },
+      ligand: calcium,
+    });
+    expect(entry?.sites).toEqual([
+      charge(63),
+      charge(107),
+      charge(200),
+      binding(75),
+      binding(77),
+      binding(80),
+      binding(85),
+      { type: 'Site', description: 'Required for specificity', location: { start: 194, end: 194 } },
+    ]);
+  });
+
+  it('keeps a ligand part, a ligand with no ChEBI id, and a labelled ligand with its note', async () => {
+    const [hba, aatm, adh] = await normalize(
+      { ...activeRawEntry('P69905', 'HBA_HUMAN'), features: [sectionRows.P69905BindingSite] },
+      sectionRows.P00505,
+      sectionRows.P00327,
+    );
+    expect(hba?.sites).toEqual([
+      {
+        type: 'Binding site',
+        description: 'proximal binding residue',
+        location: { start: 88, end: 88 },
+        ligand: { name: 'heme b', chebiId: 'CHEBI:60344' },
+        ligandPart: { name: 'Fe', chebiId: 'CHEBI:18248' },
+      },
+    ]);
+    expect(aatm?.sites?.[0]).toEqual({
+      type: 'Binding site',
+      location: { start: 65, end: 65 },
+      ligand: { name: 'substrate' },
+    });
+    expect(adh?.sites).toEqual([
+      {
+        type: 'Binding site',
+        location: { start: 47, end: 47 },
+        ligand: { name: 'Zn(2+)', chebiId: 'CHEBI:29105', label: '1', note: 'catalytic' },
+      },
+      {
+        type: 'Binding site',
+        location: { start: 98, end: 98 },
+        ligand: { name: 'Zn(2+)', chebiId: 'CHEBI:29105', label: '2' },
+      },
+    ]);
+  });
+
+  it('files signal, transit, propeptide, chain, peptide, and initiator methionine under processing', async () => {
+    const [insulin, aatm, cnr, trypsin] = await normalize(
+      sectionRows.P01308,
+      sectionRows.P00505,
+      sectionRows.P29972,
+      p07477,
+    );
+    expect(insulin?.processing).toEqual([
+      { type: 'Signal', location: { start: 1, end: 24 } },
+      {
+        type: 'Peptide',
+        description: 'Insulin B chain',
+        location: { start: 25, end: 54 },
+        featureId: 'PRO_0000015819',
+      },
+      {
+        type: 'Propeptide',
+        description: 'C peptide',
+        location: { start: 57, end: 87 },
+        featureId: 'PRO_0000015820',
+      },
+      {
+        type: 'Peptide',
+        description: 'Insulin A chain',
+        location: { start: 90, end: 110 },
+        featureId: 'PRO_0000015821',
+      },
+    ]);
+    expect(aatm?.processing).toEqual([
+      { type: 'Transit peptide', description: 'Mitochondrion', location: { start: 1, end: 29 } },
+    ]);
+    expect(cnr?.processing).toEqual([
+      { type: 'Initiator methionine', description: 'Removed', location: { start: 1, end: 1 } },
+    ]);
+    expect(trypsin?.processing?.map((f) => f.type)).toEqual([
+      'Signal',
+      'Propeptide',
+      'Chain',
+      'Chain',
+      'Chain',
+    ]);
+  });
+
+  it('files topological domains, transmembrane, and intramembrane segments under topology', async () => {
+    const [egfr, cnr] = await normalize(p00533, sectionRows.P29972);
+    expect(egfr?.topology).toEqual([
+      {
+        type: 'Topological domain',
+        description: 'Extracellular',
+        location: { start: 25, end: 645 },
+      },
+      { type: 'Transmembrane', description: 'Helical', location: { start: 646, end: 668 } },
+      {
+        type: 'Topological domain',
+        description: 'Cytoplasmic',
+        location: { start: 669, end: 1210 },
+      },
+    ]);
+    const counts = new Map<string, number>();
+    for (const f of cnr?.topology ?? []) counts.set(f.type, (counts.get(f.type) ?? 0) + 1);
+    expect(Object.fromEntries(counts)).toEqual({
+      'Topological domain': 9,
+      Transmembrane: 6,
+      Intramembrane: 2,
+    });
+    expect(cnr?.topology?.find((f) => f.type === 'Intramembrane')).toEqual({
+      type: 'Intramembrane',
+      location: { start: 69, end: 82 },
+    });
+  });
+
+  it('reads a mutagenesis row with its original and substituted residues', async () => {
+    const [entry] = await normalize({
+      ...activeRawEntry('P07477', 'TRY1_HUMAN'),
+      features: [sectionRows.P07477Mutagenesis],
+    });
+    expect(entry?.mutagenesis).toEqual([
+      {
+        description: 'Lack of sulfation.',
+        location: { start: 154, end: 154 },
+        original: 'Y',
+        variation: 'F',
+      },
+    ]);
+  });
+
+  it('files free-text comments by type with their evidence and molecule', async () => {
+    const [trypsin, p53, egfr] = await normalize(p07477, p04637, p00533);
+    expect(trypsin?.comments).toEqual([
+      { type: 'SUBUNIT', value: 'Interacts with SERPINA1', evidence: ['PubMed:11057674'] },
+      {
+        type: 'PTM',
+        value:
+          'Occurs in a single-chain form and a two-chain form, produced by proteolytic cleavage after Arg-122',
+      },
+      {
+        type: 'PTM',
+        value:
+          "Sulfation at Tyr-154 increases selectivity towards basic versus apolar residues at the P2' position of inhibitors that bind in a substrate-like fashion. Although the increase in selectivity is relatively small, it may facilitate digestion of a broader range of dietary proteins",
+        evidence: ['PubMed:25010489'],
+      },
+    ]);
+    expect(p53?.comments).toEqual([
+      {
+        type: 'DISEASE',
+        value: p04637.comments[0]?.note?.texts[0]?.value,
+      },
+      {
+        type: 'MISCELLANEOUS',
+        molecule: 'Isoform 2',
+        value:
+          'Expressed in quiescent lymphocytes. Seems to be non-functional. May be produced at very low levels due to a premature stop codon in the mRNA, leading to nonsense-mediated mRNA decay',
+        evidence: ['ECO:0000305'],
+      },
+    ]);
+    expect(egfr?.comments?.map((c) => c.type)).toEqual(['ACTIVITY REGULATION']);
+    expect(egfr?.comments?.[0]?.evidence).toHaveLength(6);
+  });
+
+  it('files every free-text comment type under comments, one row per text', async () => {
+    // UniProtKB's free-text comment types: each one's content is texts[].
+    const FREE_TEXT_TYPES = [
+      'ACTIVITY REGULATION',
+      'ALLERGEN',
+      'BIOTECHNOLOGY',
+      'CAUTION',
+      'DEVELOPMENTAL STAGE',
+      'DISRUPTION PHENOTYPE',
+      'DOMAIN',
+      'INDUCTION',
+      'MISCELLANEOUS',
+      'PATHWAY',
+      'PHARMACEUTICAL',
+      'POLYMORPHISM',
+      'PTM',
+      'SIMILARITY',
+      'SUBUNIT',
+      'TISSUE SPECIFICITY',
+      'TOXIC DOSE',
+    ];
+    const [entry] = await normalize({
+      ...activeRawEntry('P00000', 'TEST_HUMAN'),
+      comments: FREE_TEXT_TYPES.map((commentType) => ({
+        commentType,
+        texts: [{ value: `${commentType} text` }],
+      })),
+    });
+    expect(entry?.comments).toEqual(
+      FREE_TEXT_TYPES.map((type) => ({ type, value: `${type} text` })),
+    );
+  });
+
+  it('keeps every named disease with its involvement note, the note-only comment going to comments', async () => {
+    const [p53] = await normalize(p04637);
+    expect(p53?.disease).toHaveLength(8);
+    expect(p53?.disease?.[0]).toEqual({
+      name: 'Esophageal cancer',
+      diseaseId: 'DI-01537',
+      acronym: 'ESCR',
+      description: p04637.comments[1]?.disease?.description,
+      omimId: '133239',
+      note: 'The disease is caused by variants affecting the gene represented in this entry',
+    });
+    expect(p53?.disease?.map((d) => d.note)).toEqual([
+      'The disease is caused by variants affecting the gene represented in this entry',
+      'The disease is caused by variants affecting the gene represented in this entry',
+      'The gene represented in this entry is involved in disease pathogenesis',
+      'The disease is caused by variants affecting the gene represented in this entry',
+      'The disease is caused by variants affecting the gene represented in this entry',
+      'The disease is caused by variants affecting the gene represented in this entry',
+      'Disease susceptibility is associated with variants affecting the gene represented in this entry',
+      'The disease is caused by variants affecting the gene represented in this entry',
+    ]);
+  });
+
+  it('reads interaction partners, naming this entry’s isoform when UniProt gives one', async () => {
+    const [p53, egfr] = await normalize(p04637, p00533);
+    expect(p53?.interactions).toEqual([
+      { partner: 'P00519', gene: 'ABL1', experiments: 2 },
+      { partner: 'Q13155', gene: 'AIMP2', experiments: 6 },
+      { partner: 'Q7L7W2', experiments: 2 },
+      { partner: 'P26663', partnerChain: 'PRO_0000037536', experiments: 9, organismDiffer: true },
+      { partner: 'P17844', gene: 'DDX5', experiments: 2, isoform: 'P04637-1' },
+      { partner: 'P17844', gene: 'DDX5', experiments: 2, isoform: 'P04637-7' },
+    ]);
+    expect(egfr?.interactions).toHaveLength(25);
+    expect(egfr?.interactions?.[0]).toEqual({ partner: 'P00519', gene: 'ABL1', experiments: 3 });
+    expect(egfr?.interactions?.every((i) => !('isoform' in i))).toBe(true);
+  });
+
+  it('reads EC numbers off the recommended name', async () => {
+    const [trypsin, aatm] = await normalize(p07477, sectionRows.P00505);
+    expect(trypsin?.ecNumbers).toEqual(['3.4.21.4']);
+    expect(aatm?.ecNumbers).toEqual(['2.6.1.1', '2.6.1.7']);
+  });
+
+  it('keeps each GO term’s evidence type', async () => {
+    const [p53] = await normalize(p04637);
+    expect(p53?.goTerms).toEqual([
+      { id: 'GO:0005813', term: 'centrosome', aspect: 'C', evidenceType: 'IDA:UniProtKB' },
+      { id: 'GO:0000785', term: 'chromatin', aspect: 'C', evidenceType: 'IDA:BHF-UCL' },
+    ]);
+  });
+
+  it('lists the distinct Ensembl genes beside the transcript ids xrefs.Ensembl keeps', async () => {
+    const [p53, trypsin] = await normalize(p04637, p07477);
+    expect(p53?.ensemblGenes).toEqual(['ENSG00000141510.20']);
+    expect(p53?.xrefs?.Ensembl).toHaveLength(22);
+    expect(p53?.xrefs?.Ensembl?.every((id) => id.startsWith('ENST'))).toBe(true);
+    expect(trypsin?.ensemblGenes).toEqual(['ENSG00000204983.15', 'ENSG00000274247.4']);
+  });
+
+  it('omits every new key on a record without those annotations, rather than emitting empty lists', async () => {
+    const [bare] = await normalize(activeRawEntry('C9JYS6', 'C9JYS6_HUMAN', 120));
+    for (const key of [
+      'alternativeNames',
+      'ecNumbers',
+      'sites',
+      'processing',
+      'topology',
+      'mutagenesis',
+      'comments',
+      'interactions',
+      'ensemblGenes',
+    ]) {
+      expect(bare).not.toHaveProperty(key);
+    }
+  });
+
+  it('reads the organism mnemonic from the entry name, omitting it when the name carries none', async () => {
+    const [trypsin, adh, stub] = await normalize(p07477, sectionRows.P00327, {
+      ...activeRawEntry('A0A000', 'A0A000'),
+    });
+    expect(trypsin?.organism).toEqual({
+      scientificName: 'Homo sapiens',
+      commonName: 'Human',
+      taxonId: 9606,
+      mnemonic: 'HUMAN',
+    });
+    expect(adh?.organism.mnemonic).toBe('HORSE');
+    expect(stub?.organism).not.toHaveProperty('mnemonic');
+  });
+
+  it('keeps the alternative protein names beside the recommended one', async () => {
+    const [aatm, trypsin] = await normalize(sectionRows.P00505, p07477);
+    expect(aatm?.proteinName).toBe('Aspartate aminotransferase, mitochondrial');
+    expect(aatm?.alternativeNames).toEqual([
+      'Fatty acid-binding protein',
+      'Glutamate oxaloacetate transaminase 2',
+      'Kynurenine aminotransferase 4',
+      'Kynurenine aminotransferase IV',
+      'Kynurenine--oxoglutarate transaminase 4',
+      'Kynurenine--oxoglutarate transaminase IV',
+      'Plasma membrane-associated fatty acid-binding protein',
+      'Transaminase A',
+    ]);
+    expect(trypsin?.alternativeNames).toHaveLength(7);
+  });
+});
+
+describe('UniProtService — return fields the normalizers read (#34)', () => {
+  const p07477 = required(p07477Default.results[0], 'the P07477 fixture row');
+  const p04637 = required(p04637Sections.results[0], 'the P04637 fixture row');
+  const ecoliRpsD = {
+    ...activeRawEntry('P0A7V8', 'RS4_ECOLI', 206),
+    genes: sectionRows.P0A7V8.genes,
+  };
+
+  /** Normalize raw rows as the batch search returns them. */
+  async function normalize(...rows: object[]) {
+    fetchWithTimeoutMock.mockResolvedValue(jsonResponse({ results: rows }));
+    return (await service.getEntries(['P00000'], undefined, ctx())).entries;
+  }
+
+  /** The `fields` parameter of the request the service sent. */
+  function sentFields(): string | null {
+    return new URL(String(fetchWithTimeoutMock.mock.calls[0]?.[0])).searchParams.get('fields');
+  }
+
+  it('sends the default projection with the types it once left out, and nothing on request', async () => {
+    await normalize(p07477);
+    const fields = sentFields()?.split(',');
+    for (const field of ['ft_disulfid', 'ft_dna_bind', 'ft_coiled', 'xref_alphafolddb', 'cc_ptm'])
+      expect(fields).toContain(field);
+    for (const field of ['ft_mutagen', 'cc_interaction', 'xref_reactome'])
+      expect(fields).not.toContain(field);
+  });
+
+  it('sends the identity columns alone for an empty projection, on entries and searches', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(
+      jsonResponse({ results: [] }, { 'x-total-results': '0' }),
+    );
+    await service.getEntries(['P07477'], '', ctx());
+    await service.search('gene:PRSS1', { fields: '' }, ctx());
+    const [entryUrl, searchUrl] = fetchWithTimeoutMock.mock.calls.map(
+      ([url]) => new URL(String(url)),
+    );
+    expect(entryUrl?.searchParams.get('fields')).toBe(
+      'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence',
+    );
+    expect(searchUrl?.searchParams.get('fields')).toBe(
+      'accession,id,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence',
+    );
+  });
+
+  it('reads the default record’s disulfide bonds as PTMs', async () => {
+    const [trypsin] = await normalize(p07477);
+    expect(trypsin?.ptms?.filter((p) => p.type === 'Disulfide bond')).toEqual(
+      [
+        [30, 160],
+        [48, 64],
+        [139, 206],
+        [171, 185],
+        [196, 220],
+      ].map(([start, end]) => ({ type: 'Disulfide bond', location: { start, end } })),
+    );
+  });
+
+  it('lists ordered-locus and ORF names after each gene’s name and synonyms, on entries and search hits', async () => {
+    const [rpsD, vps35] = await normalize(ecoliRpsD, sectionRows.P34110);
+    expect(rpsD?.genes).toEqual(['rpsD', 'ramA', 'b3296', 'JW3258']);
+    expect(vps35?.genes).toEqual(['VPS35', 'VPT7', 'YJL154C', 'J0580']);
+
+    fetchWithTimeoutMock.mockResolvedValue(
+      jsonResponse({ results: [ecoliRpsD] }, { 'x-total-results': '1' }),
+    );
+    const page = await service.search('gene:rpsD', {}, ctx());
+    expect(page.results[0]?.geneNames).toEqual(['rpsD', 'ramA', 'b3296', 'JW3258']);
+  });
+
+  it('reads a DNA-binding region and a coiled coil as domains', async () => {
+    // P35579's coiled coil as rest.uniprot.org returned it (release 2026_04, captured 2026-11-17).
+    const coiledCoil = {
+      type: 'Coiled coil',
+      location: {
+        start: { value: 837, modifier: 'EXACT' },
+        end: { value: 1926, modifier: 'EXACT' },
+      },
+      description: '',
+      evidences: [{ evidenceCode: 'ECO:0000255' }],
+    };
+    const [p53, myh9] = await normalize(p04637, {
+      ...activeRawEntry('P35579', 'MYH9_HUMAN', 1960),
+      features: [coiledCoil],
+    });
+    expect(p53?.domains).toEqual([{ type: 'DNA binding', location: { start: 102, end: 292 } }]);
+    expect(myh9?.domains).toEqual([{ type: 'Coiled coil', location: { start: 837, end: 1926 } }]);
+  });
+
+  it('keeps every cross-reference database the projection fetched except GO', async () => {
+    const [trypsin] = await normalize(p07477);
+    expect(Object.keys(trypsin?.xrefs ?? {}).sort()).toEqual([
+      'AlphaFoldDB',
+      'ChEMBL',
+      'Ensembl',
+      'GeneID',
+      'HGNC',
+      'InterPro',
+      'MIM',
+      'PDB',
+      'Pfam',
+      'RefSeq',
+      'STRING',
+    ]);
+    expect(trypsin?.xrefs).toMatchObject({
+      AlphaFoldDB: ['P07477'],
+      HGNC: ['HGNC:9475'],
+      MIM: ['167800', '276000'],
+      GeneID: ['5644'],
+      STRING: ['9606.ENSP00000308720'],
+      Pfam: ['PF00089'],
+    });
+    expect(trypsin?.xrefs?.InterPro).toHaveLength(6);
+    expect(trypsin?.goTerms).toHaveLength(6);
+  });
+
+  it('keeps a database the caller named beyond the default set', async () => {
+    // P07477 under fields xref_reactome, as rest.uniprot.org returned it (release 2026_04, 2026-11-17).
+    const reactome = (id: string, PathwayName: string) => ({
+      database: 'Reactome',
+      id,
+      properties: [{ key: 'PathwayName', value: PathwayName }],
+    });
+    const [trypsin] = await normalize({
+      ...activeRawEntry('P07477', 'TRY1_HUMAN', 247),
+      uniProtKBCrossReferences: [
+        reactome('R-HSA-1592389', 'Activation of Matrix Metalloproteinases'),
+        reactome('R-HSA-9758881', 'Uptake of dietary cobalamins into enterocytes'),
+        reactome('R-HSA-9925561', 'Developmental Lineage of Pancreatic Acinar Cells'),
+      ],
+    });
+    expect(trypsin?.xrefs).toEqual({
+      Reactome: ['R-HSA-1592389', 'R-HSA-9758881', 'R-HSA-9925561'],
+    });
+  });
+
+  it('keys a database named like an Object prototype member as its own', async () => {
+    const [entry] = await normalize({
+      ...activeRawEntry('P07477', 'TRY1_HUMAN', 247),
+      uniProtKBCrossReferences: [
+        { database: 'constructor', id: 'c1' },
+        { database: '__proto__', id: 'p1' },
+        { database: 'constructor', id: 'c2' },
+      ],
+    });
+    expect(Object.hasOwn(entry?.xrefs ?? {}, '__proto__')).toBe(true);
+    expect(JSON.stringify(entry?.xrefs)).toBe('{"constructor":["c1","c2"],"__proto__":["p1"]}');
   });
 });
 
@@ -1876,6 +2594,7 @@ describe('UniProtService — taxonomy records', () => {
     expect(fetchWithTimeoutMock).toHaveBeenCalledTimes(2);
   });
 
+  // Thread-CPU oracle: a wall-clock timeout measures machine load, not this code (timeout 0).
   it('keeps caller-name escaping and normalization linear over a 64-fold input span', async () => {
     const costs: number[] = [];
     for (const length of [1_250, 5_000, 20_000, 80_000]) {
@@ -1897,7 +2616,7 @@ describe('UniProtService — taxonomy records', () => {
       costs.push(Math.min(...samples));
     }
     expect(costs[3]! / Math.max(costs[0]!, 1)).toBeLessThan(256);
-  });
+  }, 0);
 });
 
 describe('UniProtService — accessor guard', () => {

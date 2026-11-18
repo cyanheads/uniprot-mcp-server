@@ -2,8 +2,8 @@
 
 **Server:** uniprot-mcp-server
 **Version:** 0.4.0
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.18`
-**Engines:** Bun ≥1.4.0, Node ≥24.0.0
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.22`
+**Engines:** Bun ≥1.4.4, Node ≥24.0.0
 **MCP SDK:** `@modelcontextprotocol/server` ^2.4.0
 **Zod:** ^4.6.7
 
@@ -167,6 +167,8 @@ const ServerConfigSchema = z.object({
     .describe('Wall-clock budget for the inline ID-mapping poll loop. Should be less than timeoutMs.'),
   defaultPageSize: z.coerce.number().int().positive().max(500).default(25)
     .describe('Default page size for search and proteome protein listing.'),
+  clampLimits: z.stringbool().default(true)
+    .describe('Serve an over-the-cap size at 500 with a notice, accept any section_limit, and accept up to 500 accessions (first 20 distinct fetched, the rest deferred); false rejects them at the schema.'),
 });
 
 let _config: z.infer<typeof ServerConfigSchema> | undefined;
@@ -176,10 +178,13 @@ export function getServerConfig() {
     timeoutMs: 'UNIPROT_TIMEOUT_MS',
     idMappingBudgetMs: 'UNIPROT_ID_MAPPING_BUDGET_MS',
     defaultPageSize: 'UNIPROT_DEFAULT_PAGE_SIZE',
+    clampLimits: 'UNIPROT_CLAMP_LIMITS',
   });
   return _config;
 }
 ```
+
+Input schemas that depend on a config value (the `size`, `section_limit`, and `accessions` caps follow `UNIPROT_CLAMP_LIMITS`) read `activeServerConfig()`, never `getServerConfig()`: `tool()` emits every input schema at module import, before `createApp()` loads `.env`, and `activeServerConfig()` returns the schema defaults until `setup()` has parsed the environment.
 
 `parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`UNIPROT_BASE_URL`) not the path (`baseUrl`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
 
@@ -291,12 +296,17 @@ See framework CLAUDE.md and the `api-errors` skill for the full auto-classificat
 src/
   index.ts                              # createApp() entry point — registers the surface, inits UniProtService
   config/
-    server-config.ts                    # UNIPROT_* env vars (Zod schema), lazy-parsed
+    server-config.ts                    # UNIPROT_* env vars (Zod schema), lazy-parsed; activeServerConfig() for input schemas
   services/
     uniprot/
       uniprot-service.ts                # rest.uniprot.org REST client (init/accessor pattern)
+      proteome-query.ts                 # Proteome-scoped query assembly
+      query-cursor.ts                   # Opaque cursor bound to tool + assembled query
+      return-fields.ts                  # `fields` vocabulary: default/mandatory projections, aliases, ignoredFields split
       types.ts                          # Normalized domain types + ID-mapping enums + accession regex
   mcp-server/
+    tools/
+      input-limits.ts                   # UNIPROT_CLAMP_LIMITS: countInput(), clampPageSize(), deferral log + counter
     tools/definitions/
       uniprot-search-proteins.tool.ts   # Discovery search
       uniprot-get-entry.tool.ts         # Batch curated entries (partial-success / outline)
@@ -416,7 +426,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 
 ## Bundling
 
-`bun run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. `mcpb pack` reads `.mcpbignore`, not `.gitignore`, so every root path the bundle must not ship — source, tests, docs, caches, logs, agent docs, plugin manifests, gitignored local files — needs a root-anchored line there (`/docs/`, never `docs/`, which also strips `node_modules/*/docs/`); `lint:packaging` names each missing or unanchored line. Root `skills/` ships on purpose. The pack step is followed by `scripts/clean-mcpb.ts`, which prunes dev dependencies (`mcpb clean`) and strips four classes of `node_modules/**` content that root-anchored `.mcpbignore` patterns cannot reach: dependency-shipped agent docs (`framework-skills/`, `skills/`, `.claude/`, `.agents/`, `SKILL.md`); platform-specific native bindings, which would otherwise lock the bundle to the platform it was packed on; node-gyp build output beside a `binding.gyp` (`config.gypi`, Makefiles, `obj.target/`, `.deps/`, object files and debug symbols), which records the packing machine's paths — compiled `*.node` addons stay; and build-only package files — the framework's `changelog/`, `scripts/`, `templates/`, `CLAUDE.md`, `AGENTS.md`, and config bases (`biome.json`, `vitest.config.base.mjs`, `config/tsconfig.base.json`), and `better-sqlite3`'s `deps/` and `src/` C sources. A server using DataCanvas therefore ships a portable bundle without the DuckDB native — `@duckdb/node-api` is an optional peer loaded lazily, so canvas tools report an actionable install hint and every other tool works normally. MCPB is stdio-only — HTTP and Cloudflare Workers deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
+`bun run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. `mcpb pack` reads `.mcpbignore`, not `.gitignore`, so every root path the bundle must not ship — source, tests, docs, caches, logs, agent docs, plugin manifests, gitignored local files — needs a root-anchored line there (`/docs/`, never `docs/`, which also strips `node_modules/*/docs/`); `lint:packaging` names each missing or unanchored line. Root `skills/` ships on purpose. The pack step is followed by `scripts/clean-mcpb.ts`, which prunes dev dependencies (`mcpb clean`) and strips four classes of `node_modules/**` content that root-anchored `.mcpbignore` patterns cannot reach: dependency-shipped agent docs — `framework-skills/`, `skills/`, `.claude/`, `.agents/`, `AGENTS.md`, and `CLAUDE.md` at a package's root, and `SKILL.md` anywhere (a `skills/` deeper in a package is runtime code and stays); platform-specific native bindings, which would otherwise lock the bundle to the platform it was packed on; node-gyp build output beside a `binding.gyp` (`config.gypi`, Makefiles, `obj.target/`, `.deps/`, object files and debug symbols), which records the packing machine's paths — compiled `*.node` addons stay; and build-only package files — the framework's `changelog/`, `scripts/`, `templates/`, and config bases (`biome.json`, `vitest.config.base.mjs`, `config/tsconfig.base.json`), and `better-sqlite3`'s `deps/` and `src/` C sources. A server using DataCanvas therefore ships a portable bundle without the DuckDB native — `@duckdb/node-api` is an optional peer loaded lazily, so canvas tools report an actionable install hint and every other tool works normally. MCPB is stdio-only — HTTP and Cloudflare Workers deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
 
 **Adding an env var requires both files:** `server.json` (registry discovery, `environmentVariables[]`) and `manifest.json` (bundle install UX, `mcp_config.env` + `user_config`). `lint:packaging` (run by `devcheck`) verifies the env var names match, that every `user_config` option is wired into `mcp_config.env` as `"X": "${user_config.X}"` (the host substitutes nothing else — `"${X}"` reaches the server as that literal string), and that an optional string option carries `"default": ""`.
 

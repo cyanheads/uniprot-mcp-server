@@ -8,7 +8,8 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
-import { getServerConfig } from '@/config/server-config.js';
+import { activeServerConfig, getServerConfig } from '@/config/server-config.js';
+import { clampPageSize, countInput, PAGE_SIZE_CAP } from '@/mcp-server/tools/input-limits.js';
 import { proteomeQuery } from '@/services/uniprot/proteome-query.js';
 import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { ProteomeProteinPage } from '@/services/uniprot/types.js';
@@ -23,8 +24,10 @@ const ProteinHitSchema = z
     entryName: z.string().describe('UniProtKB mnemonic ID.'),
     proteinName: z.string().optional().describe('Recommended protein name. Omitted when none.'),
     geneNames: z
-      .array(z.string().describe('A gene name or synonym.'))
-      .describe('Gene names and synonyms.'),
+      .array(z.string().describe('A gene name, synonym, ordered-locus name, or ORF name.'))
+      .describe(
+        'Every name of each gene in UniProt order: gene name, synonyms, ordered-locus names (e.g. "b3296", "JW3258"), and ORF names (e.g. "J0580").',
+      ),
     organism: z
       .object({
         scientificName: z.string().describe('Organism scientific name.'),
@@ -39,7 +42,9 @@ const ProteinHitSchema = z
     functionSnippet: z
       .string()
       .optional()
-      .describe('First function sentence(s), evidence stripped. Omitted when none.'),
+      .describe(
+        'Opening of the first FUNCTION annotation, evidence references stripped: whole sentences within 250 characters (at least the first; one over 400 is cut at a word and ends with …). The complete annotation with evidence is uniprot_get_entry function. Omitted when none.',
+      ),
   })
   .describe('A protein in the proteome.');
 
@@ -82,15 +87,12 @@ export const getProteome = tool('uniprot_get_proteome', {
       .describe(
         'Optional UniProtKB Lucene filter to narrow the protein list, e.g. "reviewed:true AND keyword:KW-0067". Only applies when include_proteins is true.',
       ),
-    size: z
-      .number()
-      .int()
-      .positive()
-      .max(500)
-      .optional()
-      .describe(
-        'Proteins per page when include_proteins is true (max 500). Omit for the server default.',
-      ),
+    size: countInput(PAGE_SIZE_CAP, (clamped) => {
+      const fallback = activeServerConfig().defaultPageSize;
+      return clamped
+        ? `Proteins per page when include_proteins is true. Default ${fallback}; a value above ${PAGE_SIZE_CAP}, UniProt's page maximum, returns ${PAGE_SIZE_CAP} and says so.`
+        : `Proteins per page when include_proteins is true, at most ${PAGE_SIZE_CAP}. Default ${fallback}.`;
+    }).optional(),
     cursor: z
       .string()
       .optional()
@@ -167,7 +169,7 @@ export const getProteome = tool('uniprot_get_proteome', {
       .string()
       .optional()
       .describe(
-        'Truncation guidance when the protein page was capped — how to reach the rest (walk the cursor or narrow with the query filter).',
+        'Guidance: the requested and applied size when size was above the 500-row page maximum; how to reach the rest when the protein page was capped (walk the cursor or narrow with the query filter); or that no protein matched.',
       ),
   },
   errors: [
@@ -248,7 +250,14 @@ export const getProteome = tool('uniprot_get_proteome', {
       return { proteome };
     }
 
-    const cap = input.size ?? getServerConfig().defaultPageSize;
+    // ctx.enrich.notice is last-wins, so every notice the call raises is collected here and sent once.
+    const notices: string[] = [];
+    let cap = getServerConfig().defaultPageSize;
+    if (input.size !== undefined) {
+      const pageSize = clampPageSize(input.size, 'uniprot_get_proteome', ctx);
+      cap = pageSize.applied;
+      if (pageSize.notice) notices.push(pageSize.notice);
+    }
     const effectiveQuery = proteomeQuery(proteome.upid, input.query);
     const cursor = queryCursor.decode(input.cursor, 'uniprot_get_proteome', effectiveQuery);
     let page: ProteomeProteinPage;
@@ -277,19 +286,20 @@ export const getProteome = tool('uniprot_get_proteome', {
     ctx.enrich({ totalProteinsMatched: page.totalResults });
     if (input.query) ctx.enrich({ query: input.query });
     if (!page.proteins.length)
-      ctx.enrich.notice(
+      notices.push(
         `No proteins matched${input.query ? ` the filter "${input.query}"` : ' this proteome page'}.`,
       );
+    // truncated() writes the notice too (last-wins), so a truncated page carries the others in its guidance.
     if (page.cursor) {
-      ctx.enrich.truncated({
-        shown: page.proteins.length,
-        cap,
-        guidance: `Showing ${page.proteins.length} of ${page.totalResults} proteins. Walk the cursor for more, or narrow with the query filter.`,
-      });
+      notices.push(
+        `Showing ${page.proteins.length} of ${page.totalResults} proteins. Walk the cursor for more, or narrow with the query filter.`,
+      );
+      ctx.enrich.truncated({ shown: page.proteins.length, cap, guidance: notices.join(' ') });
       ctx.enrich({
         cursor: queryCursor.encode(page.cursor, 'uniprot_get_proteome', effectiveQuery),
       });
     } else {
+      if (notices.length) ctx.enrich.notice(notices.join(' '));
       ctx.enrich({ shown: page.proteins.length });
     }
 

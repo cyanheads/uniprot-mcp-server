@@ -1,0 +1,393 @@
+{
+  "results": [
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P00533",
+      "uniProtkbId": "EGFR_HUMAN",
+      "features": [
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 275, "modifier": "EXACT" },
+            "end": { "value": 275, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced autophosphorylation and activation of downstream kinases; when associated with A-309.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "12297050" }],
+          "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 287, "modifier": "EXACT" },
+            "end": { "value": 287, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced autophosphorylation and activation of downstream kinases; when associated with A-309.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "12297050" }],
+          "alternativeSequence": { "originalSequence": "F", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 309, "modifier": "EXACT" },
+            "end": { "value": 309, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced autophosphorylation and activation of downstream kinases; when associated with A-275. Strongly reduced autophosphorylation and activation of downstream kinases; when associated with A-287.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "12297050" }],
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["S"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 429, "modifier": "EXACT" },
+            "end": { "value": 429, "modifier": "EXACT" }
+          },
+          "description": "Abolishes autophosphorylation and activation of downstream kinases.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "12297050" }],
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["E"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 525, "modifier": "EXACT" },
+            "end": { "value": 1210, "modifier": "EXACT" }
+          },
+          "description": "Increased EGF binding.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19718021" }],
+          "alternativeSequence": {}
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 587, "modifier": "EXACT" },
+            "end": { "value": 590, "modifier": "EXACT" }
+          },
+          "description": "Decreases intramolecular interactions and facilitates EGF binding.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "12620237" }],
+          "alternativeSequence": { "originalSequence": "DGPH", "alternativeSequences": ["AGPA"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 587, "modifier": "EXACT" },
+            "end": { "value": 587, "modifier": "EXACT" }
+          },
+          "description": "Increased EGF binding; when associated with A-590 and A-609.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19718021" }],
+          "alternativeSequence": { "originalSequence": "D", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 590, "modifier": "EXACT" },
+            "end": { "value": 590, "modifier": "EXACT" }
+          },
+          "description": "Increased EGF binding; when associated with A-587; A-590 and A-609.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19718021" }],
+          "alternativeSequence": { "originalSequence": "H", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 609, "modifier": "EXACT" },
+            "end": { "value": 609, "modifier": "EXACT" }
+          },
+          "description": "Decreases intramolecular interactions and facilitates EGF binding. Increased EGF binding; when associated with A-587; A-590 and A-609.",
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "12620237" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19718021" }
+          ],
+          "alternativeSequence": { "originalSequence": "K", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 688, "modifier": "EXACT" },
+            "end": { "value": 688, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced phosphorylation.",
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19563760" }
+          ],
+          "alternativeSequence": { "originalSequence": "L", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 689, "modifier": "EXACT" },
+            "end": { "value": 689, "modifier": "EXACT" }
+          },
+          "description": "Reduced autophosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "V", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 689, "modifier": "EXACT" },
+            "end": { "value": 689, "modifier": "EXACT" }
+          },
+          "description": "Constitutively activated kinase.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "V", "alternativeSequences": ["M"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 690, "modifier": "EXACT" },
+            "end": { "value": 690, "modifier": "EXACT" }
+          },
+          "description": "Reduced phosphorylation.",
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19563760" }
+          ],
+          "alternativeSequence": { "originalSequence": "E", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 692, "modifier": "EXACT" },
+            "end": { "value": 692, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced phosphorylation.",
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19563760" }
+          ],
+          "alternativeSequence": { "originalSequence": "L", "alternativeSequences": ["A", "P"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 693, "modifier": "EXACT" },
+            "end": { "value": 693, "modifier": "EXACT" }
+          },
+          "description": "Increased phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "T", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 693, "modifier": "EXACT" },
+            "end": { "value": 693, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "T", "alternativeSequences": ["D"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 694, "modifier": "EXACT" },
+            "end": { "value": 694, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "P", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 699, "modifier": "EXACT" },
+            "end": { "value": 699, "modifier": "EXACT" }
+          },
+          "description": "Reduced phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "P", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 700, "modifier": "EXACT" },
+            "end": { "value": 700, "modifier": "EXACT" }
+          },
+          "description": "Abolishes phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "N", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 704, "modifier": "EXACT" },
+            "end": { "value": 704, "modifier": "EXACT" }
+          },
+          "description": "Abolishes phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "L", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 705, "modifier": "EXACT" },
+            "end": { "value": 705, "modifier": "EXACT" }
+          },
+          "description": "Abolishes phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 706, "modifier": "EXACT" },
+            "end": { "value": 706, "modifier": "EXACT" }
+          },
+          "description": "Abolishes phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "I", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 745, "modifier": "EXACT" },
+            "end": { "value": 745, "modifier": "EXACT" }
+          },
+          "description": "Abolishes kinase activity.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19560417" }],
+          "alternativeSequence": { "originalSequence": "K", "alternativeSequences": ["A", "M"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 974, "modifier": "EXACT" },
+            "end": { "value": 974, "modifier": "EXACT" }
+          },
+          "description": "Strongly reduced phosphorylation.",
+          "alternativeSequence": { "originalSequence": "D", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 977, "modifier": "EXACT" },
+            "end": { "value": 977, "modifier": "EXACT" }
+          },
+          "description": "Reduced phosphorylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19563760" }],
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1005, "modifier": "EXACT" },
+            "end": { "value": 1006, "modifier": "EXACT" }
+          },
+          "description": "Constitutively activated kinase.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19563760" }],
+          "alternativeSequence": { "originalSequence": "ED", "alternativeSequences": ["RK"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1016, "modifier": "EXACT" },
+            "end": { "value": 1016, "modifier": "EXACT" }
+          },
+          "description": "50% decrease in interaction with PIK3C2B. 65% decrease in interaction with PIK3C2B; when associated with F-1197. Abolishes interaction with PIK3C2B; when associated with F-1197 and F-1092.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10805725" }],
+          "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["F"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1048, "modifier": "EXACT" },
+            "end": { "value": 1210, "modifier": "EXACT" }
+          },
+          "description": "Abolishes palmitoylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "27153536" }],
+          "alternativeSequence": {}
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1049, "modifier": "EXACT" },
+            "end": { "value": 1049, "modifier": "EXACT" }
+          },
+          "description": "Decreased palmitoylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "27153536" }],
+          "alternativeSequence": { "originalSequence": "C", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1067, "modifier": "EXACT" },
+            "end": { "value": 1067, "modifier": "EXACT" }
+          },
+          "description": "No effect on interaction with CBLC.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "22888118" }],
+          "alternativeSequence": { "originalSequence": "Q", "alternativeSequences": ["G"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1068, "modifier": "EXACT" },
+            "end": { "value": 1068, "modifier": "EXACT" }
+          },
+          "description": "Strongly decreases interaction with CBLC.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "22888118" }],
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["G"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1069, "modifier": "EXACT" },
+            "end": { "value": 1069, "modifier": "EXACT" }
+          },
+          "description": "Abolishes interaction with CBLC.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "22888118" }],
+          "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["F"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1092, "modifier": "EXACT" },
+            "end": { "value": 1092, "modifier": "EXACT" }
+          },
+          "description": "No change in interaction with PIK3C2B. Abolishes interaction with PIK3C2B; when associated with F-1197 and F-1016.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10805725" }],
+          "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["F"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1110, "modifier": "EXACT" },
+            "end": { "value": 1110, "modifier": "EXACT" }
+          },
+          "description": "No change in interaction with PIK3C2B.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10805725" }],
+          "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["F"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1146, "modifier": "EXACT" },
+            "end": { "value": 1146, "modifier": "EXACT" }
+          },
+          "description": "Decreased palmitoylation.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "27153536" }],
+          "alternativeSequence": { "originalSequence": "C", "alternativeSequences": ["A"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1172, "modifier": "EXACT" },
+            "end": { "value": 1172, "modifier": "EXACT" }
+          },
+          "description": "No change in interaction with PIK3C2B.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10805725" }],
+          "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["F"] }
+        },
+        {
+          "type": "Mutagenesis",
+          "location": {
+            "start": { "value": 1197, "modifier": "EXACT" },
+            "end": { "value": 1197, "modifier": "EXACT" }
+          },
+          "description": "No change in interaction with PIK3C2B. 65% decrease in interaction with PIK3C2B; when associated with F-1016. Abolishes interaction with PIK3C2B; when associated with F-1092 and F-1016.",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10805725" }],
+          "alternativeSequence": { "originalSequence": "Y", "alternativeSequences": ["F"] }
+        }
+      ],
+      "extraAttributes": { "uniParcId": "UPI000003E750" }
+    }
+  ]
+}

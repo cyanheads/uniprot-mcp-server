@@ -1,6 +1,6 @@
 # uniprot-mcp-server - Directory Structure
 
-Generated on: 2026-11-04 02:26:30
+Generated on: 2026-11-18 05:21:34
 
 ```text
 uniprot-mcp-server/
@@ -156,23 +156,32 @@ uniprot-mcp-server/
 │   │   │       ├── uniprot-entry.resource.ts
 │   │   │       └── uniprot-taxonomy.resource.ts
 │   │   └── tools/
-│   │       └── definitions/
-│   │           ├── uniprot-get-entry.tool.ts
-│   │           ├── uniprot-get-proteome.tool.ts
-│   │           ├── uniprot-get-sequence.tool.ts
-│   │           ├── uniprot-get-taxonomy.tool.ts
-│   │           ├── uniprot-map-ids.tool.ts
-│   │           └── uniprot-search-proteins.tool.ts
+│   │       ├── definitions/
+│   │       │   ├── uniprot-get-entry.tool.ts
+│   │       │   ├── uniprot-get-proteome.tool.ts
+│   │       │   ├── uniprot-get-sequence.tool.ts
+│   │       │   ├── uniprot-get-taxonomy.tool.ts
+│   │       │   ├── uniprot-map-ids.tool.ts
+│   │       │   └── uniprot-search-proteins.tool.ts
+│   │       └── input-limits.ts
 │   ├── services/
 │   │   └── uniprot/
 │   │       ├── proteome-query.ts
 │   │       ├── query-cursor.ts
+│   │       ├── return-fields.ts
 │   │       ├── types.ts
 │   │       └── uniprot-service.ts
 │   └── index.ts
 ├── tests/
+│   ├── config/
+│   │   └── server-config.test.ts
 │   ├── fixtures/
-│   │   └── p00918-xrefs.json
+│   │   ├── p00533-mutagenesis.json
+│   │   ├── p00533-sections.json
+│   │   ├── p00918-xrefs.json
+│   │   ├── p04637-sections.json
+│   │   ├── p07477-default.json
+│   │   └── section-rows.json
 │   ├── prompts/
 │   │   └── uniprot-protein-dossier.prompt.test.ts
 │   ├── resources/
@@ -181,10 +190,12 @@ uniprot-mcp-server/
 │   ├── services/
 │   │   ├── bundle-agent-docs.test.ts
 │   │   ├── query-cursor.test.ts
+│   │   ├── return-fields.test.ts
 │   │   ├── taxonomy-deadline.test.ts
 │   │   ├── uniprot-mapping.test.ts
 │   │   └── uniprot-service.test.ts
 │   ├── tools/
+│   │   ├── input-limits.test.ts
 │   │   ├── uniprot-get-entry.tool.test.ts
 │   │   ├── uniprot-get-proteome.tool.test.ts
 │   │   ├── uniprot-get-sequence.tool.test.ts

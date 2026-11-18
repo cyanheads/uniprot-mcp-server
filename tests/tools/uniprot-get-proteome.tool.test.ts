@@ -8,9 +8,11 @@
  * @module tests/tools/uniprot-get-proteome.tool.test
  */
 
+import { z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, notFound, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getServerConfig } from '@/config/server-config.js';
 import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { Proteome, ProteomeProteinPage } from '@/services/uniprot/types.js';
 import {
@@ -77,6 +79,193 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe('getProteome size cap (#41)', () => {
+  const p53Hit = {
+    accession: 'P04637',
+    entryName: 'P53_HUMAN',
+    geneNames: ['TP53'],
+    organism: { scientificName: 'Homo sapiens', taxonId: 9606 },
+    length: 393,
+    reviewed: true,
+    annotationScore: 5,
+    proteinExistence: '1: Evidence at protein level',
+  };
+  /** The `size` property as `tools/list` advertises it. */
+  const advertisedSize = () =>
+    (
+      z.toJSONSchema(getProteome.input, { io: 'input', target: 'draft-2020-12' }) as {
+        properties: Record<string, Record<string, unknown>>;
+      }
+    ).properties.size as Record<string, unknown>;
+
+  beforeEach(() => {
+    getProteomeMock.mockResolvedValue(humanProteome);
+    getProteomeProteinsMock.mockResolvedValue({
+      proteins: [p53Hit],
+      totalResults: 147506,
+      cursor: 'NEXT_CURSOR',
+    } satisfies ProteomeProteinPage);
+  });
+
+  afterEach(() => {
+    getServerConfig().clampLimits = true;
+  });
+
+  it.each([501, 1e20])(
+    'requests size %s as 500, its notice beside the truncation guidance on both surfaces',
+    async (size) => {
+      const result = await runToolContract(getProteome, {
+        upid: 'UP000005640',
+        include_proteins: true,
+        size,
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(getProteomeProteinsMock).toHaveBeenCalledWith(
+        'UP000005640',
+        expect.objectContaining({ size: 500 }),
+        expect.anything(),
+      );
+      const out = result.structuredContent as { notice: string; cap: number; cursor: string };
+      expect(out.notice).toContain(
+        `size ${String(size)} is above UniProt's page maximum of 500, so this page was requested at size 500.`,
+      );
+      expect(out.notice).toContain('Walk the cursor for more');
+      expect(out.cap).toBe(500);
+      expect(contentText(result)).toContain(out.notice);
+      expect(queryCursor.decode(out.cursor, 'uniprot_get_proteome', 'proteome:UP000005640')).toBe(
+        'NEXT_CURSOR',
+      );
+    },
+  );
+
+  it('keeps the clamp notice beside "No proteins matched" on an empty last page, on both surfaces', async () => {
+    getProteomeProteinsMock.mockResolvedValue({
+      proteins: [],
+      totalResults: 0,
+    } satisfies ProteomeProteinPage);
+    const result = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+      size: 501,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as { notice: string; shown: number };
+    expect(out.notice).toBe(
+      "size 501 is above UniProt's page maximum of 500, so this page was requested at size 500. No proteins matched this proteome page.",
+    );
+    expect(out.shown).toBe(0);
+    expect(out).not.toHaveProperty('cursor');
+    expect(contentText(result)).toContain(out.notice);
+  });
+
+  it('sends size 500 as asked, with no clamp notice', async () => {
+    const result = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+      size: 500,
+    });
+    expect(getProteomeProteinsMock).toHaveBeenCalledWith(
+      'UP000005640',
+      expect.objectContaining({ size: 500 }),
+      expect.anything(),
+    );
+    expect((result.structuredContent as { notice: string }).notice).not.toContain('page maximum');
+  });
+
+  it('leaves a size without include_proteins unclamped and unmentioned', async () => {
+    const result = await runToolContract(getProteome, { upid: 'UP000005640', size: 501 });
+    expect(result.isError).toBeFalsy();
+    expect(getProteomeProteinsMock).not.toHaveBeenCalled();
+    expect(result.structuredContent).not.toHaveProperty('notice');
+  });
+
+  it('rejects a fractional size as an integer mistake, before any request', async () => {
+    const result = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+      size: 1.5,
+    });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_arguments' });
+    expect(errorEnvelope(result).message).toContain('expected int');
+    expect(getProteomeMock).not.toHaveBeenCalled();
+  });
+
+  it('advertises size as an integer with a minimum and no maximum', () => {
+    expect(advertisedSize()).toMatchObject({ type: 'integer', minimum: 1 });
+    expect(advertisedSize().maximum).toBeUndefined();
+  });
+
+  it('under UNIPROT_CLAMP_LIMITS=false advertises maximum 500 and rejects 501 before any request', async () => {
+    getServerConfig().clampLimits = false;
+    expect(advertisedSize()).toMatchObject({ type: 'integer', minimum: 1, maximum: 500 });
+    const result = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+      size: 501,
+    });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_arguments' });
+    expect(errorEnvelope(result).message).toContain('<=500');
+    expect(getProteomeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('getProteome function snippet (#36, real service)', () => {
+  /** A first FUNCTION text of five evidence-tagged sentences, well past 400 characters. */
+  const LONG_FUNCTION =
+    'Multifunctional transcription factor that induces cell cycle arrest, DNA repair or apoptosis upon binding to its target DNA sequence (PubMed:11025664, PubMed:12524540, PubMed:12810724). Acts as a tumor suppressor in many tumor types; induces growth arrest or apoptosis depending on the physiological circumstances and cell type (PubMed:11025664). Involved in cell cycle regulation as a trans-activator that acts to negatively regulate cell division by controlling a set of genes required for this process (PubMed:15340061). One of the activated genes is an inhibitor of cyclin-dependent kinases (By similarity). Apoptosis induction seems to be mediated either by stimulation of BAX and FAS antigen expression, or by repression of Bcl-2 expression (PubMed:12524540).';
+  /** Its first sentence, evidence stripped: 133 characters, where adding the second would run past 250. */
+  const SNIPPET =
+    'Multifunctional transcription factor that induces cell cycle arrest, DNA repair or apoptosis upon binding to its target DNA sequence.';
+
+  it('bounds a long FUNCTION text on an include_proteins row on both surfaces, omitting it for a row without one', async () => {
+    expect(LONG_FUNCTION.length).toBeGreaterThan(400);
+    getProteomeMock.mockResolvedValue(humanProteome);
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) => {
+        if (url.pathname !== '/uniprotkb/search') return;
+        const p53 = {
+          ...RAW_ENTRIES.p53,
+          comments: [
+            { commentType: 'FUNCTION', texts: [{ value: LONG_FUNCTION }] },
+            ...RAW_ENTRIES.p53.comments,
+          ],
+        };
+        const response = upstreamResponse(200, { results: [p53, RAW_ENTRIES.rhodopsin] });
+        response.headers.set('x-total-results', '2');
+        return response;
+      }),
+    );
+    getProteomeProteinsMock.mockImplementation(realService.getProteomeProteins.bind(realService));
+
+    const result = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as {
+      proteins: { accession: string; functionSnippet?: string }[];
+    };
+    expect(out.proteins.map((hit) => hit.accession)).toEqual(['P04637', 'P08100']);
+    expect(out.proteins[0]?.functionSnippet).toBe(SNIPPET);
+    expect(out.proteins[1]).not.toHaveProperty('functionSnippet');
+    const lines = contentText(result).split('\n');
+    const p53At = lines.indexOf('- **P04637** (P53_HUMAN) Cellular tumor antigen p53 [TP53, P53]');
+    expect(p53At).toBeGreaterThan(-1);
+    // The snippet follows P04637's meta line; P08100, which has no FUNCTION, gets no snippet line.
+    expect(lines.slice(p53At + 2, p53At + 4)).toEqual([
+      `  ${SNIPPET}`,
+      expect.stringMatching(/^- \*\*P08100\*\* /),
+    ]);
+    expect(lines.filter((line) => line.startsWith('  ') && !line.includes(' · '))).toEqual([
+      `  ${SNIPPET}`,
+    ]);
+  });
 });
 
 describe('getProteome', () => {

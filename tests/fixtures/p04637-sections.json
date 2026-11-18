@@ -1,0 +1,515 @@
+{
+  "results": [
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P04637",
+      "uniProtkbId": "P53_HUMAN",
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "annotationScore": 5.0,
+      "proteinDescription": {
+        "recommendedName": { "fullName": { "value": "Cellular tumor antigen p53" } },
+        "alternativeNames": [
+          { "fullName": { "value": "Antigen NY-CO-13" } },
+          { "fullName": { "value": "Phosphoprotein p53" } },
+          { "fullName": { "value": "Tumor suppressor p53" } }
+        ]
+      },
+      "genes": [{ "geneName": { "value": "TP53" }, "synonyms": [{ "value": "P53" }] }],
+      "sequence": { "length": 393 },
+      "extraAttributes": { "uniParcId": "UPI000002ED67" },
+      "comments": [
+        {
+          "commentType": "DISEASE",
+          "note": {
+            "texts": [
+              {
+                "value": "TP53 is found in increased amounts in a wide variety of transformed cells. TP53 is frequently mutated or inactivated in about 60% of cancers. TP53 defects are found in Barrett metaplasia a condition in which the normally stratified squamous epithelium of the lower esophagus is replaced by a metaplastic columnar epithelium. The condition develops as a complication in approximately 10% of patients with chronic gastroesophageal reflux disease and predisposes to the development of esophageal adenocarcinoma"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Esophageal cancer",
+            "diseaseAccession": "DI-01537",
+            "acronym": "ESCR",
+            "description": "A malignancy of the esophagus. The most common types are esophageal squamous cell carcinoma and adenocarcinoma. Cancer of the esophagus remains a devastating disease because it is usually not detected until it has progressed to an advanced incurable stage.",
+            "diseaseCrossReference": { "database": "MIM", "id": "133239" }
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "The disease is caused by variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Li-Fraumeni syndrome",
+            "diseaseAccession": "DI-01904",
+            "acronym": "LFS",
+            "description": "An autosomal dominant familial cancer syndrome that in its classic form is defined by the existence of a proband affected by a sarcoma before 45 years with a first degree relative affected by any tumor before 45 years and another first degree relative with any tumor before 45 years or a sarcoma at any age. Other clinical definitions for LFS have been proposed and called Li-Fraumeni like syndrome (LFL). In these families affected relatives develop a diverse set of malignancies at unusually early ages. Four types of cancers account for 80% of tumors occurring in TP53 germline mutation carriers: breast cancers, soft tissue and bone sarcomas, brain tumors (astrocytomas) and adrenocortical carcinomas. Less frequent tumors include choroid plexus carcinoma or papilloma before the age of 15, rhabdomyosarcoma before the age of 5, leukemia, Wilms tumor, malignant phyllodes tumor, colorectal and gastric cancers.",
+            "diseaseCrossReference": { "database": "MIM", "id": "151623" },
+            "evidences": [
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10484981" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "1565144" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "1737852" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "1933902" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "1978757" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "2259385" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "36108750" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7887414" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "8825920" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "9452042" }
+            ]
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "The disease is caused by variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Squamous cell carcinoma of the head and neck",
+            "diseaseAccession": "DI-01696",
+            "acronym": "HNSCC",
+            "description": "A non-melanoma skin cancer affecting the head and neck. The hallmark of cutaneous SCC is malignant transformation of normal epidermal keratinocytes.",
+            "diseaseCrossReference": { "database": "MIM", "id": "275355" }
+          },
+          "note": {
+            "texts": [
+              { "value": "The gene represented in this entry is involved in disease pathogenesis" }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Lung cancer",
+            "diseaseAccession": "DI-02205",
+            "acronym": "LNCR",
+            "description": "A common malignancy affecting tissues of the lung. The most common form of lung cancer is non-small cell lung cancer (NSCLC) that can be divided into 3 major histologic subtypes: squamous cell carcinoma, adenocarcinoma, and large cell lung cancer. NSCLC is often diagnosed at an advanced stage and has a poor prognosis.",
+            "diseaseCrossReference": { "database": "MIM", "id": "211980" }
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "The disease is caused by variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Papilloma of choroid plexus",
+            "diseaseAccession": "DI-01346",
+            "acronym": "CPP",
+            "description": "A benign tumor of neuroectodermal origin that generally occurs in childhood, but has also been reported in adults. Although generally found within the ventricular system, choroid plexus papillomas can arise ectopically in the brain parenchyma or disseminate throughout the neuraxis. Patients present with signs and symptoms of increased intracranial pressure including headache, hydrocephalus, papilledema, nausea, vomiting, cranial nerve deficits, gait impairment, and seizures.",
+            "diseaseCrossReference": { "database": "MIM", "id": "260500" },
+            "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "12085209" }]
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "The disease is caused by variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Adrenocortical carcinoma",
+            "diseaseAccession": "DI-02740",
+            "acronym": "ADCC",
+            "description": "A malignant neoplasm of the adrenal cortex and a rare childhood tumor. It occurs with increased frequency in patients with Beckwith-Wiedemann syndrome and Li-Fraumeni syndrome.",
+            "diseaseCrossReference": { "database": "MIM", "id": "202300" },
+            "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11481490" }]
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "The disease is caused by variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Basal cell carcinoma 7",
+            "diseaseAccession": "DI-03503",
+            "acronym": "BCC7",
+            "description": "A common malignant skin neoplasm that typically appears on hair-bearing skin, most commonly on sun-exposed areas. It is slow growing and rarely metastasizes, but has potentialities for local invasion and destruction. It usually develops as a flat, firm, pale area that is small, raised, pink or red, translucent, shiny, and waxy, and the area may bleed following minor injury. Tumor size can vary from a few millimeters to several centimeters in diameter.",
+            "diseaseCrossReference": { "database": "MIM", "id": "614740" },
+            "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "21946351" }]
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "Disease susceptibility is associated with variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Bone marrow failure syndrome 5",
+            "diseaseAccession": "DI-05371",
+            "acronym": "BMFS5",
+            "description": "A form of bone marrow failure syndrome, a heterogeneous group of life-threatening disorders characterized by hematopoietic defects in association with a range of variable extra-hematopoietic manifestations. BMFS5 is an autosomal dominant form characterized by infantile onset of severe red cell anemia requiring transfusion. Additional features include hypogammaglobulinemia, poor growth with microcephaly, developmental delay, and seizures.",
+            "diseaseCrossReference": { "database": "MIM", "id": "618165" },
+            "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "30146126" }]
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "The disease is caused by variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        },
+        {
+          "texts": [
+            {
+              "evidences": [{ "evidenceCode": "ECO:0000305" }],
+              "value": "Expressed in quiescent lymphocytes. Seems to be non-functional. May be produced at very low levels due to a premature stop codon in the mRNA, leading to nonsense-mediated mRNA decay"
+            }
+          ],
+          "commentType": "MISCELLANEOUS",
+          "molecule": "Isoform 2"
+        },
+        {
+          "commentType": "INTERACTION",
+          "interactions": [
+            {
+              "interactantOne": { "uniProtKBAccession": "P04637", "intActId": "EBI-366083" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P00519",
+                "geneName": "ABL1",
+                "intActId": "EBI-375543"
+              },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P04637", "intActId": "EBI-366083" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q13155",
+                "geneName": "AIMP2",
+                "intActId": "EBI-745226"
+              },
+              "numberOfExperiments": 6,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P04637", "intActId": "EBI-366083" },
+              "interactantTwo": { "uniProtKBAccession": "Q7L7W2", "intActId": "EBI-7210801" },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P04637", "intActId": "EBI-366083" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P26663",
+                "chainId": "PRO_0000037536",
+                "intActId": "EBI-6838571"
+              },
+              "numberOfExperiments": 9,
+              "organismDiffer": true
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P04637-1", "intActId": "EBI-3895849" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P17844",
+                "geneName": "DDX5",
+                "intActId": "EBI-351962"
+              },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P04637-7", "intActId": "EBI-3895873" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P17844",
+                "geneName": "DDX5",
+                "intActId": "EBI-351962"
+              },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "type": "DNA binding",
+          "location": {
+            "start": { "value": 102, "modifier": "EXACT" },
+            "end": { "value": 292, "modifier": "EXACT" }
+          },
+          "description": "",
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "16793544" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "18996393" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "20364130" }
+          ]
+        }
+      ],
+      "uniProtKBCrossReferences": [
+        {
+          "database": "GO",
+          "id": "GO:0005813",
+          "properties": [
+            { "key": "GoTerm", "value": "C:centrosome" },
+            { "key": "GoEvidenceType", "value": "IDA:UniProtKB" }
+          ],
+          "evidences": [{ "evidenceCode": "ECO:0000314", "source": "PubMed", "id": "28842590" }]
+        },
+        {
+          "database": "GO",
+          "id": "GO:0000785",
+          "properties": [
+            { "key": "GoTerm", "value": "C:chromatin" },
+            { "key": "GoEvidenceType", "value": "IDA:BHF-UCL" }
+          ],
+          "evidences": [
+            { "evidenceCode": "ECO:0000314", "source": "PubMed", "id": "15710329" },
+            { "evidenceCode": "ECO:0000314", "source": "PubMed", "id": "17805299" },
+            { "evidenceCode": "ECO:0000314", "source": "PubMed", "id": "22521434" },
+            { "evidenceCode": "ECO:0000314", "source": "PubMed", "id": "23629966" },
+            { "evidenceCode": "ECO:0000314", "source": "PubMed", "id": "24289924" }
+          ]
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000269305.9",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000269305.4" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000420246.6",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000391127.2" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-2"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000445888.6",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000391478.2" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000455263.6",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000398846.2" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-3"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000503591.2",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000426252.2" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000504290.5",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000484409.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-9"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000504937.5",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000481179.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-7"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000508793.6",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000424104.2" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000509690.6",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000425104.2" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-7"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000510385.5",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000478499.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-8"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000610292.4",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000478219.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-4"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000610538.4",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000480868.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-6"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000619485.4",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000482537.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-4"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000620739.4",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000481638.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-4"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000622645.4",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000482222.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-5"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000714357.1",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000519624.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000714359.1",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000519626.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000905353.1",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000575412.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000923566.1",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000593625.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000923567.1",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000593626.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000923568.1",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000593627.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000923569.1",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000593628.1" },
+            { "key": "GeneId", "value": "ENSG00000141510.20" }
+          ],
+          "isoformId": "P04637-1"
+        }
+      ]
+    }
+  ]
+}

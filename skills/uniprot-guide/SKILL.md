@@ -4,7 +4,7 @@ description: Resolve protein identity and organism scope with uniprot_* tools be
 license: Apache-2.0
 metadata:
   author: "cyanheads"
-  version: "1.0"
+  version: "1.1"
 ---
 
 ## Scope
@@ -25,13 +25,13 @@ Use UniProt for protein identity, functional annotations, sequence, cross-databa
 
 1. **Establish identity before writing a dossier.** Check the returned gene, organism, and reviewed status against the intended protein. A top-ranked name match or one-to-many identifier mapping is a candidate set, not permission to choose its first row. If candidates remain biologically distinct, narrow the query or ask which organism, strain, or protein the user means.
 2. **Establish taxonomic scope before interpreting an empty result.** Inspect the resolved name and rank. Exact organism nodes and their descendants are different search sets: species-level requests can need entries assigned to strains or subspecies. A reference proteome is a particular protein set, not every UniProt entry assigned to a species. Use the query reference to make the intended scope explicit.
-3. **Check coverage before claiming absence.** A reviewed-only search can miss unreviewed entries; a filtered proteome list can exclude the protein; a page can omit later matches. State the scope actually searched. A missing annotation means it was not returned or annotated in the retrieved record, not that the biological property is absent.
-4. **Read evidence before making functional claims.** Search function snippets omit evidence references. Fetch the entry annotations and retain their attached evidence for a cited summary. Distinguish reviewed status, annotation score, and protein-existence evidence instead of treating any one as proof of every functional claim.
+3. **Check coverage before claiming absence.** A reviewed-only search can miss unreviewed entries; a filtered proteome list can exclude the protein; a page can omit later matches. State the scope actually searched. A missing annotation means it was not returned or annotated in the retrieved record, not that the biological property is absent. The same holds for what a call set aside: `deferredAccessions` were not fetched, `outlinedEntries` were not inlined, `ignoredFields` were not requested, and the entry's `mutagenesis` and `interactions` sections are returned only when named. Fetch each before concluding a record lacks that data.
+4. **Read evidence before making functional claims.** A search or proteome `functionSnippet` is the opening sentences of the first function annotation with evidence references stripped. Fetch the entry annotations and retain their attached evidence for a cited summary. Distinguish reviewed status, annotation score, and protein-existence evidence instead of treating any one as proof of every functional claim.
 5. **Finish the mapping set before reconciling it.** Preserve source-to-target pairs and all candidate targets. A finished mapping job can still have further result pages; one page's mapping count is not a count of successfully mapped input IDs. Report unresolved inputs and any remaining pages before calling the translation complete.
 
 ## Core chain
 
-Resolve organism identity when needed, then discover or map protein candidates. Validate the candidates against the requested biological identity before fetching the entry sections that support the answer. Retrieve sequence only when the task needs it, and keep canonical and isoform identities distinct. Follow cross-references when the answer needs information held by another database.
+Resolve organism identity when needed, then discover or map protein candidates. Validate the candidates against the requested biological identity before fetching the entry sections that support the answer. An entry call fetches up to 20 distinct accessions: pass `deferredAccessions` as `accessions` on the next call, and re-call each `outlinedEntries` accession alone, then with `sections` for the parts the answer needs. Retrieve sequence only when the task needs it, and keep canonical and isoform identities distinct. Follow cross-references when the answer needs information held by another database.
 
 ## Workflows
 

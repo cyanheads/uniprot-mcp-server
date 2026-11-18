@@ -10,7 +10,10 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { activeServerConfig } from '@/config/server-config.js';
+import { clampPageSize, countInput, PAGE_SIZE_CAP } from '@/mcp-server/tools/input-limits.js';
 import { queryCursor } from '@/services/uniprot/query-cursor.js';
+import { ignoredFieldsNotice, searchFieldRequest } from '@/services/uniprot/return-fields.js';
 import type { SearchPage } from '@/services/uniprot/types.js';
 import {
   describeInactiveInFull,
@@ -37,8 +40,10 @@ const ProteinHitSchema = z
       .optional()
       .describe('Recommended full protein name. Omitted when the entry has none.'),
     geneNames: z
-      .array(z.string().describe('A gene name or synonym.'))
-      .describe('Gene names and synonyms for the protein.'),
+      .array(z.string().describe('A gene name, synonym, ordered-locus name, or ORF name.'))
+      .describe(
+        'Every name of each gene for the protein in UniProt order: gene name, synonyms, ordered-locus names (e.g. "b3296", "JW3258"), and ORF names (e.g. "J0580").',
+      ),
     organism: z
       .object({
         scientificName: z.string().describe('Organism scientific name, e.g. "Homo sapiens".'),
@@ -67,7 +72,7 @@ const ProteinHitSchema = z
       .string()
       .optional()
       .describe(
-        'First sentence(s) of the FUNCTION annotation, evidence references stripped. Omitted when no function is annotated.',
+        'Opening of the first FUNCTION annotation, evidence references stripped: whole sentences within 250 characters (at least the first; one over 400 is cut at a word and ends with …). The complete annotation with evidence is uniprot_get_entry function. Omitted when no function is annotated.',
       ),
   })
   .describe('A UniProtKB search hit.');
@@ -134,7 +139,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .string()
       .optional()
       .describe(
-        'Comma-separated UniProtKB field names to project, e.g. "accession,gene_names,cc_function". Omit for a sensible default set covering name, gene, organism, length, reviewed, score, and a function snippet.',
+        'Comma-separated UniProtKB return-field names that trim each hit, e.g. "accession,gene_names" to drop the function snippet. Omit for the default hit: name, gene, organism, length, reviewed, score, and a function snippet. The identity fields always come back. Hits carry only these fields: accession, id, protein_name, gene_names, gene_primary, gene_synonym, gene_oln, gene_orf, organism_name, organism_id, length, reviewed, annotation_score, protein_existence, cc_function. Any other field (e.g. ec, ft_act_site, xref_pdb) is not requested and comes back in ignoredFields with a notice — fetch it with uniprot_get_entry. Text that is not a field name fails invalid_query with UniProt\'s message.',
       ),
     facets: z
       .string()
@@ -142,13 +147,12 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .describe(
         'Comma-separated upstream facet names for count breakdowns, e.g. "reviewed,model_organism,proteins_with". Returns a facets array alongside the hits.',
       ),
-    size: z
-      .number()
-      .int()
-      .positive()
-      .max(500)
-      .optional()
-      .describe('Number of hits per page (max 500). Omit for the server default.'),
+    size: countInput(PAGE_SIZE_CAP, (clamped) => {
+      const fallback = activeServerConfig().defaultPageSize;
+      return clamped
+        ? `Number of hits per page. Default ${fallback}; a value above ${PAGE_SIZE_CAP}, UniProt's page maximum, returns ${PAGE_SIZE_CAP} and says so.`
+        : `Number of hits per page, at most ${PAGE_SIZE_CAP}. Default ${fallback}.`;
+    }).optional(),
     cursor: z
       .string()
       .optional()
@@ -208,8 +212,18 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .string()
       .optional()
       .describe(
-        'Guidance when nothing matched, distinguishing plain text from a structured query and suggesting how to broaden.',
+        'Guidance: the requested and applied size when size was above the 500-row page maximum; when fields named fields hits do not carry, those fields, where to get them, and the fields hits carry; and, when nothing matched, how to broaden — distinguishing plain text from a structured query.',
       ),
+    ignoredFields: z
+      .array(z.string().describe('A requested field name, lowercased, that hits do not carry.'))
+      .optional()
+      .describe(
+        'Names in fields that hits do not carry, in request order — left out of the UniProt request, so the search answered without them. Absent when every name was returned.',
+      ),
+  },
+  enrichmentTrailer: {
+    // Ignored names are field-shaped (return-fields FIELD_NAME), so they render without escaping.
+    ignoredFields: { render: (names: string[]) => `**Ignored fields:** ${names.join(', ')}` },
   },
   errors: [
     {
@@ -271,15 +285,28 @@ export const searchProteins = tool('uniprot_search_proteins', {
       ? [luceneQuery ? groupClause(clause) : `(${clause})`, ...filters].join(' AND ')
       : clause;
     const cursor = queryCursor.decode(input.cursor, 'uniprot_search_proteins', effectiveQuery);
+    // ctx.enrich.notice is last-wins, so every notice the call raises is collected here and sent once.
+    const notices: string[] = [];
+    const pageSize =
+      input.size === undefined
+        ? undefined
+        : clampPageSize(input.size, 'uniprot_search_proteins', ctx);
+    if (pageSize?.notice) notices.push(pageSize.notice);
+    // A requested field a hit cannot carry is not fetched; the search answers without it and says so.
+    const { fields, ignored } = searchFieldRequest(input.fields);
+    if (ignored.length > 0) {
+      ctx.enrich({ ignoredFields: ignored });
+      notices.push(ignoredFieldsNotice(ignored, 'search'));
+    }
 
     let page: SearchPage;
     try {
       page = await getUniProtService().search(
         effectiveQuery,
         {
-          ...(input.fields ? { fields: input.fields } : {}),
+          ...(fields !== undefined ? { fields } : {}),
           ...(input.facets ? { facets: input.facets } : {}),
-          ...(input.size ? { size: input.size } : {}),
+          ...(pageSize ? { size: pageSize.applied } : {}),
           ...(cursor ? { cursor } : {}),
         },
         ctx,
@@ -308,10 +335,11 @@ export const searchProteins = tool('uniprot_search_proteins', {
         tier === 'reviewed'
           ? 'Broaden the terms or set reviewed: false to search both Swiss-Prot and unreviewed TrEMBL.'
           : 'Broaden the terms.';
-      ctx.enrich.notice(
+      notices.push(
         `No proteins matched the ${luceneQuery ? 'query' : 'plain-text search'}. ${guidance}${luceneQuery ? ' Check field syntax in query.' : ''}`,
       );
     }
+    if (notices.length) ctx.enrich.notice(notices.join(' '));
 
     ctx.log.info('UniProtKB search completed', {
       total: page.totalResults,

@@ -36,9 +36,9 @@ Protein research over UniProtKB. Search by function or gene, fetch curated recor
 | Tool | Description |
 |:---|:---|
 | `uniprot_search_proteins` | Search UniProtKB by plain text or a Lucene field query, with the reviewed (Swiss-Prot) filter foregrounded and optional server-side facet counts. Cursor-paginated. The discovery entry point. |
-| `uniprot_get_entry` | Fetch full curated entries by accession in one batch (up to 20) — function, catalytic activity, disease, variants, isoforms, GO terms, cross-references. Partial-success output; an oversized record returns a section outline. |
+| `uniprot_get_entry` | Fetch full curated entries by accession in one batch (up to 20 distinct per call, the rest deferred) — names, function, catalytic activity, sites, topology, disease, PTMs and processing, variants, isoforms, comments, GO terms, cross-references. Partial-success output; each record too large to inline is listed in `outlinedEntries` and returns a section outline when re-called alone. |
 | `uniprot_map_ids` | Translate identifiers across databases via UniProt's async ID-mapping service — gene names, Ensembl, RefSeq, ChEMBL, PDB, GeneID ↔ UniProtKB accessions. Polls within a budget; running jobs return a ticket and completed pages return a continuation. |
-| `uniprot_get_proteome` | Fetch a reference proteome by UPID or NCBI taxon ID — protein count, BUSCO completeness, genome assembly inline, plus an opt-in capped page of the proteins. |
+| `uniprot_get_proteome` | Fetch a reference proteome by UPID or NCBI taxon ID — protein count, BUSCO completeness, genome assembly inline, plus an opt-in page of the proteins (up to 500). |
 | `uniprot_get_taxonomy` | Resolve a taxonomy record by NCBI taxon ID or organism name — exact name matching, rank, parent, full lineage, and optionally the immediate children, cursor-paginated. |
 | `uniprot_get_sequence` | Fetch the canonical amino-acid sequence (FASTA) for an accession, with length and parsed header — and optionally the isoform sequences. The cheap sequence-only path. |
 
@@ -68,6 +68,9 @@ The [UniProt guide](skills/uniprot-guide/SKILL.md) covers protein identity, spec
 - `text_search` for plain language **or** `query` for Lucene field syntax (`gene`, `organism_id`, `taxonomy_id`, `keyword`, `go`, `reviewed`, `protein_name`, `family`, `length`, `existence`, `accession`) — exactly one. Plain-text punctuation and uppercase Boolean words are escaped. Structured queries reject unbalanced parentheses. Optional `facets` return count breakdowns (e.g. `reviewed`, `model_organism`)
 - The `organism_id` input restricts the whole query to that taxon and its descendants. For exact-node scope, use `organism_id:<id>` inside `query` instead
 - `reviewed` defaults to `true` (Swiss-Prot only); `false` searches both tiers (put `reviewed:false` in `query` for TrEMBL only). Every hit carries `reviewed`, `annotationScore`, and `proteinExistence`
+- `size` is served up to 500, UniProt's page maximum: a larger value returns 500 rows with a notice (`UNIPROT_CLAMP_LIMITS=false` rejects it at the schema instead)
+- Each hit's `functionSnippet` is whole sentences within 250 characters (at least the first; one over 400 is cut at a word and ends with `…`), evidence tags stripped; the full annotation is `uniprot_get_entry` `function`. `geneNames` carries every name of each gene, including ordered-locus (`b3296`) and ORF (`JW3258`) names
+- `fields` trims each hit to the fields hits carry (the default set, plus `gene_primary`, `gene_synonym`, `gene_oln`, `gene_orf`); the identity fields always come back. Names are case-insensitive. A field a hit cannot carry (e.g. `ec`, `xref_pdb`) is not requested, is listed in `ignoredFields`, and is named in a notice pointing to `uniprot_get_entry`. Text that is not a field name fails `invalid_query` with UniProt's message
 - Forward-only cursor pagination; returns `totalResults` and the effective query. Cursors bind to this tool and the exact assembled query, including organism/reviewed filters. Changing `size`, `fields`, or `facets` keeps continuation valid; a changed query, malformed token, or legacy raw cursor fails `invalid_cursor`: restart without it
 - Inactive accessions (merged, demerged, or deleted) go in `inactive[]` with the reason and replacements, not in `results[]`
 
@@ -75,9 +78,12 @@ The [UniProt guide](skills/uniprot-guide/SKILL.md) covers protein identity, spec
 
 ### `uniprot_get_entry` <sub>tool</sub>
 
-- Up to 20 accessions per call, from `uniprot_search_proteins` or `uniprot_map_ids` (strip any `-N` isoform suffix). Sectioned record: function, catalytic activity, cofactors, subcellular location, disease, PTMs, natural variants, isoforms, domains, GO terms, keywords, cross-references. `fields` trims the output; identity and provenance fields are always kept
+- Accepts up to 500 accessions per call, from `uniprot_search_proteins` or `uniprot_map_ids` (strip any `-N` isoform suffix). Repeats collapse, the first 20 distinct are fetched, and the rest come back in `deferredAccessions` to pass as `accessions` on the next call (`UNIPROT_CLAMP_LIMITS=false` restores the strict 20-accession schema maximum)
+- Sectioned record: names (`alternativeNames`, `ecNumbers`), function, catalytic activity, cofactors, `sites` (active, binding, and other sites, with ligand and ChEBI ids), subcellular location, `topology` (transmembrane, intramembrane, and topological domains), disease (with `note`), PTMs, `processing` (signal, transit, propeptide, chain, peptide, initiator Met), natural variants, isoforms, domains, `comments` (PTM, pathway, subunit, tissue specificity, and any free-text comment type named in `fields`), GO terms (with `evidenceType`), keywords, cross-references, and `ensemblGenes`. `organism.mnemonic` is populated from the entry name (e.g. `HUMAN`)
+- `mutagenesis` and `interactions` (IntAct partners, with `partnerChain` and `chain`) are left out of the default record because they run to hundreds of rows on well-studied proteins; they come back only when `sections` names them (or `fields` includes `ft_mutagen` / `cc_interaction`)
+- `fields` replaces the default projection with UniProtKB return-field names (case-insensitive; `keywordid` is sent as `keyword`, `rhea` as `cc_catalytic_activity`; any `xref_<database>` fills `xrefs`; GO terms are `goTerms`, from `go`). Identity and provenance fields are always kept. A field the tool cannot return (e.g. `sequence`, which is `uniprot_get_sequence`) is not requested, is listed in `ignoredFields`, and is named in a notice. A malformed `xref_` name or text that is not a field name fails `invalid_fields` with UniProt's message
 - Resolved entries come back in `succeeded[]`, unknown or inactive ones in `failed[]`, so one bad accession doesn't abort the batch. An inactive accession's error names the merge target, the demerge products, or the UniParc ID
-- Initial responses exceeding 24,000 UTF-8 bytes across `content[]` and `structuredContent` return `kind: "outline"`. A single resolved accession returns a section listing; an oversized batch returns `outlinedEntries` in request order, preserving every `failed[]` entry. Re-call each outlined accession individually, then use `sections: [...]` for the parts you need. Explicit sections render every returned item, including all cross-reference IDs; a very large list section pages with `section_limit` (1–500) and `section_offset`, reporting `totalCount` and `nextOffset`
+- Each record is measured on its own, as a one-accession call would measure it: one within 24,000 UTF-8 bytes across `content[]` and `structuredContent` inlines in `succeeded[]`, and a larger one is listed in `outlinedEntries` (with its `bytes`) in request order. A batch returns `kind: "full"`; `kind: "outline"` is only the section outline of a single accession. Re-call each outlined accession alone, then use `sections: [...]` for the parts you need. Explicit sections render every returned item, including all cross-reference IDs; every list section pages with `section_limit` and `section_offset` (`section_limit` has no maximum, `UNIPROT_CLAMP_LIMITS=false` caps it at 500), reporting `totalCount` and `nextOffset`
 
 ---
 
@@ -96,7 +102,7 @@ The [UniProt guide](skills/uniprot-guide/SKILL.md) covers protein identity, spec
 
 - Provide exactly one of `upid` (e.g. `UP000005640`) or `taxon_id`; both or neither fails validation. Resolve an organism name to a taxon ID first with `uniprot_get_taxonomy`. Taxon lookup prefers an exact reference proteome, then a unique descendant reference. Multiple descendants return candidate UPIDs and organism identities for explicit selection, with a next-page link when suggestions are incomplete
 - Returns proteome type, total protein count, BUSCO completeness (score, complete/fragmented/missing counts, lineage dataset), and genome assembly accession
-- Proteins are opt-in via `include_proteins` (human has ~147,506) and come back as a capped page with a forward cursor; narrow with `query` (UniProtKB Lucene syntax). Cursors bind to the resolved UPID, exact query, and tool; a taxon ID and UPID resolving to the same proteome may share a cursor, and `size` may change. Changed membership or a legacy raw cursor fails `invalid_cursor`: restart without it
+- Proteins are opt-in via `include_proteins` (human has ~147,506) and come back as a page with a forward cursor; `size` above 500, UniProt's page maximum, returns 500 with a notice (`UNIPROT_CLAMP_LIMITS=false` rejects it at the schema). Each row's `functionSnippet` is whole sentences within 250 characters, evidence tags stripped. Narrow with `query` (UniProtKB Lucene syntax). Cursors bind to the resolved UPID, exact query, and tool; a taxon ID and UPID resolving to the same proteome may share a cursor, and `size` may change. Changed membership or a legacy raw cursor fails `invalid_cursor`: restart without it
 
 ---
 
@@ -120,7 +126,7 @@ The [UniProt guide](skills/uniprot-guide/SKILL.md) covers protein identity, spec
 ### `uniprot://entry/{accession}` <sub>resource</sub>
 
 - Same record as `uniprot_get_entry` for a single accession, addressed by URI. An inactive accession (merged, demerged, or deleted) fails `not_found`
-- A very large entry returns an identity summary (accession, entry name, protein name, genes, organism, length, reviewed status, annotation score, protein existence) plus a section outline; fetch specific sections with `uniprot_get_entry` (`sections: [...]`), since the URI takes no sections parameter
+- The default record, without the on-request `mutagenesis` and `interactions` sections. A very large entry (P04637 is about 420 KB across both output surfaces) returns an identity summary (accession, entry name, protein name, genes, organism, length, reviewed status, annotation score, protein existence) plus a section outline; fetch specific sections with `uniprot_get_entry` (`sections: [...]`), since the URI takes no sections parameter
 
 ---
 
@@ -145,14 +151,14 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 UniProt-specific:
 
 - Keyless — UniProt REST requires no API key; works against any `rest.uniprot.org`-compatible base (override `UNIPROT_BASE_URL` for a private mirror)
-- Batch entry fetch — N accessions in one round trip, with any missing ones flagged
+- Batch entry fetch — up to 20 distinct accessions per round trip, any beyond that handed back to pass on the next call, and any missing ones flagged
 - Async ID mapping with a bounded poll, a resumable ticket for running jobs, and paginated results
 
 Agent-friendly output:
 
 - Provenance is data, not decoration — `reviewed`, `annotationScore`, `proteinExistence`, and per-field PubMed/ECO evidence ship on every record so the agent can weigh manual vs. predicted annotation
 - Graceful partial failure — `uniprot_get_entry` returns per-accession `succeeded[]` / `failed[]` rows instead of aborting the batch
-- Explicit output shapes — `uniprot_get_entry` returns `kind: "full" | "outline"`, and `uniprot_map_ids` returns either a `ticket` or a `continuation`
+- Explicit output shapes — `uniprot_get_entry` returns `kind: "full" | "outline"` (an outline only for one oversized accession; oversized batch members land in `outlinedEntries`), and `uniprot_map_ids` returns either a `ticket` or a `continuation`
 - Sparsity preserved — absent upstream fields stay absent, never fabricated (most curated sections are legitimately missing on TrEMBL entries)
 
 ## Getting started
@@ -233,7 +239,7 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 bun run start:http
 
 ### Prerequisites
 
-- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
+- [Bun v1.4.4](https://bun.sh/) or higher (or Node.js v24+).
 - No API key — UniProt REST is keyless and open. Data is [UniProt](https://www.uniprot.org), CC BY 4.0.
 
 ### Installation
@@ -266,6 +272,7 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `UNIPROT_TIMEOUT_MS` | Per-request HTTP timeout in ms. | `30000` |
 | `UNIPROT_ID_MAPPING_BUDGET_MS` | Time budget for the ID-mapping poll before returning a ticket. Must be less than `UNIPROT_TIMEOUT_MS`. | `8000` |
 | `UNIPROT_DEFAULT_PAGE_SIZE` | Default page size for search and proteome protein listing when the caller leaves it unset. | `25` |
+| `UNIPROT_CLAMP_LIMITS` | Serve an over-the-cap `size` (search, proteome) at 500 with a notice, accept any `section_limit`, and accept up to 500 `accessions` on `uniprot_get_entry` (first 20 distinct fetched, the rest deferred). `false` restores the strict schema maximums (500, 500, 20) and rejects anything above them. | `true` |
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for HTTP server. | `3010` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |

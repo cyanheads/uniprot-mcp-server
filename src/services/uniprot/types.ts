@@ -1,8 +1,8 @@
 /**
  * @fileoverview Domain types for the UniProt service — normalized, agent-facing
  *   shapes derived from the live `rest.uniprot.org` JSON (verified against the
- *   API), plus the ID-mapping database enum and job-id shape, the canonical
- *   default field set, the query-grouping check tools run before any request
+ *   API), plus the ID-mapping database enum and job-id shape, the
+ *   query-grouping check tools run before any request
  *   (`unbalancedParenthesis`) and the wrapper they group a clause with
  *   (`groupClause`), and the one caller-facing wording for an inactive
  *   accession (`describeInactive`, `describeInactiveInFull`).
@@ -51,66 +51,6 @@ export const ID_MAPPING_TO_DBS = [
 
 export type IdMappingFromDb = (typeof ID_MAPPING_FROM_DBS)[number];
 export type IdMappingToDb = (typeof ID_MAPPING_TO_DBS)[number];
-
-/**
- * Default UniProtKB `fields` projection for search results — keeps payloads
- * small while carrying the provenance signal (reviewed flag, annotation score,
- * protein-existence level) the agent needs to weigh curation quality.
- */
-export const DEFAULT_SEARCH_FIELDS =
-  'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence,cc_function';
-
-/**
- * Default UniProtKB `fields` projection for full entries. Covers the curated
- * sections the entry tool normalizes (function, catalytic activity, cofactors,
- * location, disease, PTMs, variants, isoforms, domains, GO, keywords, xrefs).
- */
-export const DEFAULT_ENTRY_FIELDS =
-  'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence,cc_function,cc_catalytic_activity,cc_cofactor,cc_subcellular_location,cc_disease,ft_mod_res,ft_carbohyd,ft_variant,cc_alternative_products,ft_domain,ft_region,go,keyword,xref_pdb,xref_ensembl,xref_refseq,xref_chembl';
-
-/**
- * UniProtKB fields that back the required (non-optional) columns of the entry
- * output schema. UniProt only returns `id`, `length`, `annotation_score`,
- * `protein_existence`, and the organism fields when they are explicitly
- * requested, so a caller-supplied `fields` that omits them would otherwise drop
- * `entryName` (a hard schema-validation crash) or silently fabricate
- * provenance (`0` score, `unknown` existence). These are always merged into the
- * upstream request so a custom `fields` trims sections without dropping identity.
- */
-export const MANDATORY_ENTRY_FIELDS = [
-  'accession',
-  'id',
-  'protein_name',
-  'gene_names',
-  'organism_name',
-  'organism_id',
-  'length',
-  'reviewed',
-  'annotation_score',
-  'protein_existence',
-] as const;
-
-/**
- * UniProtKB fields that back the required (non-optional) columns of the search
- * output schema (`ProteinHit`). Mirrors `MANDATORY_ENTRY_FIELDS` minus
- * `protein_name` (optional on a hit). UniProt omits `id`, `length`, organism,
- * `annotation_score`, `protein_existence`, and `reviewed` unless explicitly
- * requested, so a caller-supplied `fields` (e.g. `accession,gene_names`) that
- * drops them would crash on the missing `entryName` or fabricate provenance.
- * Always merged into the upstream search request so a custom `fields` trims the
- * projection without dropping the identity/provenance columns.
- */
-export const MANDATORY_SEARCH_FIELDS = [
-  'accession',
-  'id',
-  'gene_names',
-  'organism_name',
-  'organism_id',
-  'length',
-  'reviewed',
-  'annotation_score',
-  'protein_existence',
-] as const;
 
 /**
  * UniProtKB primary accession pattern. Covers both the 6-character format
@@ -236,6 +176,8 @@ export type Disease = {
   acronym?: string;
   description?: string;
   omimId?: string;
+  /** How the gene is involved, e.g. "The disease is caused by variants affecting the gene represented in this entry". */
+  note?: string;
 };
 
 /** A sequence feature (PTM, variant, domain, region). */
@@ -246,14 +188,55 @@ export type Feature = {
   featureId?: string;
 };
 
-/** A natural variant (dbSNP/ClinVar), with the residue change when present. */
+/** A ligand UniProt names on a binding site; `chebiId` is the bare `CHEBI:n` form. */
+export type Ligand = {
+  name: string;
+  chebiId?: string;
+  /** Tells apart copies of one ligand at different sites, e.g. "1". */
+  label?: string;
+  note?: string;
+};
+
+/** An active, binding, or other functional site; a binding site names its ligand. */
+export type Site = Feature & {
+  ligand?: Ligand;
+  /** The part of the ligand the residue binds, e.g. the Fe of heme b. */
+  ligandPart?: { name: string; chebiId?: string };
+};
+
+/** A free-text annotation (PTM, PATHWAY, SUBUNIT, …), one row per text. */
+export type Comment = {
+  /** UniProt's commentType, e.g. "PTM" or "TISSUE SPECIFICITY". */
+  type: string;
+  value: string;
+  evidence?: string[];
+  /** The isoform or chain the text is about, e.g. "Isoform 2". */
+  molecule?: string;
+};
+
+/** A binary interaction partner (IntAct). */
+export type Interaction = {
+  /** The partner's UniProtKB accession, an isoform accession when IntAct names one. */
+  partner: string;
+  /** The partner's chain feature ID when IntAct names one product of a polyprotein, e.g. "PRO_0000037536". */
+  partnerChain?: string;
+  gene?: string;
+  experiments: number;
+  /** True when the partner comes from another organism; omitted otherwise. */
+  organismDiffer?: boolean;
+  /** This entry's isoform accession when the interaction is recorded for one, e.g. "P04637-7". */
+  isoform?: string;
+  /** This entry's chain feature ID when the interaction is recorded for one product of a polyprotein. */
+  chain?: string;
+};
+
+/** A natural variant or a mutagenesis experiment, with the residue change when present. */
 export type Variant = {
   description?: string;
   location: { start?: number; end?: number };
   original?: string;
   variation?: string;
   featureId?: string;
-  xrefs?: string[];
 };
 
 /** An isoform produced by alternative splicing. */
@@ -268,6 +251,8 @@ export type GoTerm = {
   id: string;
   term: string;
   aspect: string;
+  /** GO evidence code and its assigning source, e.g. "IDA:UniProtKB" or "IEA:InterPro". */
+  evidenceType?: string;
 };
 
 /** A UniProt keyword (KW-accession). */
@@ -342,24 +327,34 @@ export type Entry = {
   accession: string;
   entryName: string;
   proteinName?: string;
+  alternativeNames?: string[];
   genes: string[];
   organism: Organism;
   length: number;
   reviewed: boolean;
   annotationScore: number;
   proteinExistence: string;
+  ecNumbers?: string[];
   function?: EvidencedText[];
   catalyticActivity?: Reaction[];
   cofactors?: Cofactor[];
+  sites?: Site[];
   subcellularLocation?: Location[];
+  topology?: Feature[];
   disease?: Disease[];
   ptms?: Feature[];
+  processing?: Feature[];
   variants?: Variant[];
+  mutagenesis?: Variant[];
   isoforms?: Isoform[];
   domains?: Feature[];
+  comments?: Comment[];
+  interactions?: Interaction[];
   goTerms?: GoTerm[];
   keywords?: Keyword[];
   xrefs?: Record<string, string[]>;
+  /** Distinct Ensembl gene IDs behind the transcript IDs in `xrefs.Ensembl`. */
+  ensemblGenes?: string[];
 };
 
 /** BUSCO completeness sub-report. */

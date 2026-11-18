@@ -11,9 +11,11 @@
  * @module tests/tools/uniprot-search-proteins.tool.test
  */
 
+import { z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, serviceUnavailable } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getServerConfig } from '@/config/server-config.js';
 import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { SearchPage } from '@/services/uniprot/types.js';
 import {
@@ -272,8 +274,119 @@ describe('searchProteins validation', () => {
     });
   });
 
-  it('rejects a size above the cap at the schema edge', () => {
-    expect(() => searchProteins.input.parse({ text_search: 'x', size: 501 })).toThrow();
+  it('rejects a size above the cap at the schema edge under UNIPROT_CLAMP_LIMITS=false', () => {
+    getServerConfig().clampLimits = false;
+    try {
+      expect(() => searchProteins.input.parse({ text_search: 'x', size: 501 })).toThrow();
+    } finally {
+      getServerConfig().clampLimits = true;
+    }
+  });
+});
+
+describe('searchProteins size cap (#41)', () => {
+  /** The `size` property as `tools/list` advertises it. */
+  const advertisedSize = () =>
+    (
+      z.toJSONSchema(searchProteins.input, { io: 'input', target: 'draft-2020-12' }) as {
+        properties: Record<string, Record<string, unknown>>;
+      }
+    ).properties.size as Record<string, unknown>;
+
+  afterEach(() => {
+    getServerConfig().clampLimits = true;
+  });
+
+  it.each([501, 1e20])(
+    'requests size %s as 500, with a notice naming both values on both surfaces and the cursor intact',
+    async (size) => {
+      searchMock.mockResolvedValue({ ...onePage, totalResults: 4457, cursor: 'NEXT' });
+      const result = await runToolContract(searchProteins, { text_search: 'kinase', size });
+
+      expect(result.isError).toBeFalsy();
+      expect(searchMock).toHaveBeenCalledWith(expect.any(String), { size: 500 }, expect.anything());
+      const out = result.structuredContent as { notice: string; cursor: string };
+      expect(out.notice).toBe(
+        `size ${String(size)} is above UniProt's page maximum of 500, so this page was requested at size 500.`,
+      );
+      expect(contentText(result)).toContain(out.notice);
+      expect(
+        queryCursor.decode(out.cursor, 'uniprot_search_proteins', '(kinase) AND reviewed:true'),
+      ).toBe('NEXT');
+    },
+  );
+
+  it('sends size 500 as asked, with no notice', async () => {
+    searchMock.mockResolvedValue(onePage);
+    const result = await runToolContract(searchProteins, { text_search: 'kinase', size: 500 });
+    expect(searchMock).toHaveBeenCalledWith(expect.any(String), { size: 500 }, expect.anything());
+    expect(result.structuredContent).not.toHaveProperty('notice');
+  });
+
+  it('carries the clamp notice beside the no-match notice', async () => {
+    searchMock.mockResolvedValue({ results: [], inactive: [], totalResults: 0 });
+    const result = await runToolContract(searchProteins, { text_search: 'kinase', size: 501 });
+    const notice = (result.structuredContent as { notice: string }).notice;
+    expect(notice).toContain('No proteins matched');
+    expect(notice).toContain('size 501');
+    expect(contentText(result)).toContain(notice);
+  });
+
+  it('rejects a fractional size as an integer mistake, before any request', async () => {
+    const result = await runToolContract(searchProteins, { text_search: 'kinase', size: 1.5 });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_arguments' });
+    expect(errorEnvelope(result).message).toContain('expected int');
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it('advertises size as an integer with a minimum and no maximum', () => {
+    expect(advertisedSize()).toMatchObject({ type: 'integer', minimum: 1 });
+    expect(advertisedSize().maximum).toBeUndefined();
+  });
+
+  it('under UNIPROT_CLAMP_LIMITS=false advertises maximum 500 and rejects 501 before any request', async () => {
+    getServerConfig().clampLimits = false;
+    expect(advertisedSize()).toMatchObject({ type: 'integer', minimum: 1, maximum: 500 });
+    const result = await runToolContract(searchProteins, { text_search: 'kinase', size: 501 });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_arguments' });
+    expect(errorEnvelope(result).message).toContain('<=500');
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('searchProteins function snippet (#36, real service)', () => {
+  /** A first FUNCTION text of five evidence-tagged sentences, well past 400 characters. */
+  const LONG_FUNCTION =
+    'Receptor tyrosine kinase binding ligands of the EGF family and activating several signaling cascades to convert extracellular cues into appropriate cellular responses (PubMed:10805725, PubMed:2790960). Known ligands include EGF, TGFA/TGF-alpha, AREG and BTC/betacellulin (PubMed:12297049). Ligand binding triggers receptor homo- and/or heterodimerization and autophosphorylation on key cytoplasmic residues (By similarity). The phosphorylated receptor recruits adapter proteins like GRB2 which in turn activates complex downstream signaling cascades (PubMed:17909029). Activates at least 4 major downstream signaling cascades including the RAS-RAF-MEK-ERK, PI3 kinase-AKT, PLCgamma-PKC and STATs modules (PubMed:27153536).';
+  /** Its first two sentences, evidence stripped: 237 characters, where the third would run past 250. */
+  const SNIPPET =
+    'Receptor tyrosine kinase binding ligands of the EGF family and activating several signaling cascades to convert extracellular cues into appropriate cellular responses. Known ligands include EGF, TGFA/TGF-alpha, AREG and BTC/betacellulin.';
+
+  it('bounds a long first FUNCTION text to whole sentences on both surfaces', async () => {
+    expect(LONG_FUNCTION.length).toBeGreaterThan(400);
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) => {
+        if (url.pathname !== '/uniprotkb/search') return;
+        const row = {
+          ...activeRawEntry('P00533', 'EGFR_HUMAN', 1210),
+          comments: [{ commentType: 'FUNCTION', texts: [{ value: LONG_FUNCTION }] }],
+        };
+        const response = upstreamResponse(200, { results: [row] });
+        response.headers.set('x-total-results', '1');
+        return response;
+      }),
+    );
+    searchMock.mockImplementation(realService.search.bind(realService));
+
+    const result = await runToolContract(searchProteins, { query: 'gene:EGFR' });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as { results: { functionSnippet?: string }[] };
+    expect(out.results[0]?.functionSnippet).toBe(SNIPPET);
+    const text = contentText(result);
+    expect(text.split('\n')).toContain(`**Function:** ${SNIPPET}`);
+    expect(text).not.toContain('Ligand binding triggers');
   });
 });
 
@@ -445,6 +558,7 @@ describe('searchProteins literal text and descendant scope', () => {
     expect(contentText(result)).toContain(notice);
   });
 
+  // Thread-CPU oracle: a wall-clock timeout measures machine load, not this code (timeout 0).
   it.each(['NOT ( [ ', '  \r\n', '\\', '§1 x'])(
     'assembles long plain text with bounded CPU growth: %j',
     async (unit) => {
@@ -469,6 +583,7 @@ describe('searchProteins literal text and descendant scope', () => {
       }
       expect(searchMock).toHaveBeenCalledTimes(1);
     },
+    0,
   );
 });
 
@@ -683,10 +798,14 @@ describe('searchProteins upstream rejection (through runToolContract)', () => {
     ['query field', UNIPROT_400_BODIES.badQueryField, { query: 'badfield:abc' }],
     // An unclosed quote passes the local parenthesis check and reaches UniProt's own 400.
     ['query syntax', UNIPROT_400_BODIES.invalidSyntax, { query: 'kinase "apoptosis' }],
+    // Text that is not a field name goes upstream as sent (captured 2026-11-17, release 2026_04).
     [
       'fields value',
-      UNIPROT_400_BODIES.badFields,
-      { query: 'gene:TP53', fields: 'definitely_not_a_uniprot_field' },
+      {
+        url: 'http://rest.uniprot.org/uniprotkb/search',
+        messages: ["Invalid fields parameter value 'not-a-field'"],
+      } as const,
+      { query: 'gene:TP53', fields: 'not-a-field' },
     ],
     // UniProt's message lists the facets it accepts.
     ['facet', UNIPROT_400_BODIES.badFacet, { query: 'gene:TP53', facets: 'not_a_facet' }],
@@ -769,6 +888,166 @@ describe('searchProteins upstream rejection (through runToolContract)', () => {
     const envelope = errorEnvelope(result);
     expect(envelope.code).toBe(JsonRpcErrorCode.ServiceUnavailable);
     expect(envelope.data?.reason).toBeUndefined();
+  });
+});
+
+describe('searchProteins return fields (#34, real service, through runToolContract)', () => {
+  type Out = {
+    results: { accession: string; geneNames: string[] }[];
+    ignoredFields?: string[];
+    notice?: string;
+  };
+  const IDENTITY_FIELDS =
+    'accession,id,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence';
+
+  /** Answer the search with these raw rows and a matching x-total-results. */
+  function searchReturns(...rows: object[]) {
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname !== '/uniprotkb/search') return;
+      const response = upstreamResponse(200, { results: rows });
+      response.headers.set('x-total-results', String(rows.length));
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    searchMock.mockImplementation(realService.search.bind(realService));
+    return fetchStub;
+  }
+
+  const sentFields = (fetchStub: ReturnType<typeof routeUpstream>) =>
+    requestedUrls(fetchStub)[0]?.searchParams.get('fields');
+
+  const egfrRow = {
+    ...activeRawEntry('P00533', 'EGFR_HUMAN', 1210),
+    genes: [{ geneName: { value: 'EGFR' }, synonyms: [{ value: 'ERBB' }, { value: 'ERBB1' }] }],
+  };
+
+  it('sends none of the fields a hit cannot carry, and names them with a route to uniprot_get_entry', async () => {
+    const fetchStub = searchReturns(egfrRow);
+    const result = await runToolContract(searchProteins, {
+      query: 'gene:EGFR',
+      organism_id: 9606,
+      fields: 'accession,ec,cc_subcellular_location,xref_pdb,ft_act_site',
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(sentFields(fetchStub)).toBe(IDENTITY_FIELDS);
+    const out = result.structuredContent as Out;
+    expect(out.results.map((r) => r.accession)).toEqual(['P00533']);
+    expect(out.ignoredFields).toEqual(['ec', 'cc_subcellular_location', 'xref_pdb', 'ft_act_site']);
+    const notice = required(out.notice, 'the ignored-field notice');
+    expect(notice).toContain(
+      'Ignored fields: ec, cc_subcellular_location, xref_pdb, ft_act_site — search hits do not carry them, so they were not requested from UniProt.',
+    );
+    expect(notice).toContain(
+      'uniprot_get_entry returns ec, cc_subcellular_location, xref_pdb, ft_act_site: pass these results\' accessions with fields:"ec,cc_subcellular_location,xref_pdb,ft_act_site".',
+    );
+    const text = contentText(result);
+    expect(text).toContain(
+      '**Ignored fields:** ec, cc_subcellular_location, xref_pdb, ft_act_site',
+    );
+    expect(text).toContain(`> ${notice}`);
+  });
+
+  it('keeps a projection a hit renders whole, with no ignoredFields and no notice', async () => {
+    const fetchStub = searchReturns(egfrRow);
+    const result = await runToolContract(searchProteins, {
+      query: 'gene:EGFR',
+      fields: 'accession,gene_names,cc_function',
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(sentFields(fetchStub)).toBe(`${IDENTITY_FIELDS},cc_function`);
+    const out = result.structuredContent as Out;
+    expect(out).not.toHaveProperty('ignoredFields');
+    expect(out).not.toHaveProperty('notice');
+    expect(contentText(result)).not.toContain('Ignored fields');
+  });
+
+  it('lists P0A7V8’s ordered-locus names among the hit’s gene names', async () => {
+    searchReturns({
+      ...activeRawEntry('P0A7V8', 'RS4_ECOLI', 206),
+      genes: [
+        {
+          geneName: { value: 'rpsD' },
+          synonyms: [{ value: 'ramA' }],
+          orderedLocusNames: [{ value: 'b3296' }, { value: 'JW3258' }],
+        },
+      ],
+    });
+    const result = await runToolContract(searchProteins, { query: 'gene:rpsD' });
+
+    expect((result.structuredContent as Out).results[0]?.geneNames).toEqual([
+      'rpsD',
+      'ramA',
+      'b3296',
+      'JW3258',
+    ]);
+    expect(contentText(result)).toContain('**Genes:** rpsD, ramA, b3296, JW3258');
+  });
+
+  it('joins the ignored-field notice to the no-match notice, on both surfaces', async () => {
+    searchReturns();
+    const result = await runToolContract(searchProteins, { query: 'gene:NOPE', fields: 'ec' });
+
+    const notice = required((result.structuredContent as Out).notice, 'the joined notice');
+    expect(notice).toContain('Ignored fields: ec — ');
+    expect(notice).toContain('No proteins matched the query.');
+    expect(contentText(result)).toContain(`> ${notice}`);
+  });
+
+  it('joins the ignored-field notice to the size-clamp notice, on both surfaces', async () => {
+    const fetchStub = searchReturns(egfrRow);
+    const result = await runToolContract(searchProteins, {
+      query: 'gene:EGFR',
+      size: 501,
+      fields: 'accession,ec',
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(requestedUrls(fetchStub)[0]?.searchParams.get('size')).toBe('500');
+    const out = result.structuredContent as Out;
+    expect(out.ignoredFields).toEqual(['ec']);
+    const notice = required(out.notice, 'the joined notice');
+    expect(notice).toContain(
+      "size 501 is above UniProt's page maximum of 500, so this page was requested at size 500.",
+    );
+    expect(notice).toContain(
+      'Ignored fields: ec — search hits do not carry them, so they were not requested from UniProt.',
+    );
+    const text = contentText(result);
+    expect(text).toContain('**Ignored fields:** ec');
+    expect(text).toContain(`> ${notice}`);
+  });
+
+  it('sends only the identity columns when every requested field is ignored, so no hit carries a function snippet', async () => {
+    // Answers as UniProt does: the FUNCTION comment comes back only when cc_function is requested.
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname !== '/uniprotkb/search') return;
+      const requested = url.searchParams.get('fields')?.split(',') ?? [];
+      const row = requested.includes('cc_function')
+        ? {
+            ...egfrRow,
+            comments: [
+              { commentType: 'FUNCTION', texts: [{ value: 'Receptor tyrosine kinase.' }] },
+            ],
+          }
+        : egfrRow;
+      const response = upstreamResponse(200, { results: [row] });
+      response.headers.set('x-total-results', '1');
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    searchMock.mockImplementation(realService.search.bind(realService));
+
+    const result = await runToolContract(searchProteins, { query: 'gene:EGFR', fields: 'ec' });
+
+    expect(result.isError).toBeFalsy();
+    expect(sentFields(fetchStub)).toBe(IDENTITY_FIELDS);
+    const out = result.structuredContent as Out & { results: { functionSnippet?: string }[] };
+    expect(out.results.map((r) => r.accession)).toEqual(['P00533']);
+    expect(out.results[0]).not.toHaveProperty('functionSnippet');
+    expect(out.ignoredFields).toEqual(['ec']);
+    expect(contentText(result)).not.toContain('**Function:**');
   });
 });
 

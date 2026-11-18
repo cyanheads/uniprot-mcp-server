@@ -1,0 +1,369 @@
+{
+  "results": [
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P00533",
+      "uniProtkbId": "EGFR_HUMAN",
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "annotationScore": 5.0,
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "evidences": [{ "evidenceCode": "ECO:0000305" }],
+            "value": "Epidermal growth factor receptor"
+          },
+          "ecNumbers": [
+            {
+              "evidences": [
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "32926474" }
+              ],
+              "value": "2.7.10.1"
+            }
+          ]
+        },
+        "alternativeNames": [
+          { "fullName": { "value": "Proto-oncogene c-ErbB-1" } },
+          { "fullName": { "value": "Receptor tyrosine-protein kinase erbB-1" } }
+        ],
+        "flag": "Precursor"
+      },
+      "genes": [
+        {
+          "geneName": {
+            "evidences": [
+              { "evidenceCode": "ECO:0000303", "source": "PubMed", "id": "32926474" },
+              { "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:3236" }
+            ],
+            "value": "EGFR"
+          },
+          "synonyms": [{ "value": "ERBB" }, { "value": "ERBB1" }, { "value": "HER1" }]
+        }
+      ],
+      "sequence": { "length": 1210 },
+      "extraAttributes": { "uniParcId": "UPI000003E750" },
+      "comments": [
+        {
+          "texts": [
+            {
+              "evidences": [
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "15282549" },
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "15590694" },
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "17334392" },
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "18046415" },
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "19836242" },
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "25922362" }
+              ],
+              "value": "Endocytosis and inhibition of the activated EGFR by phosphatases like PTPRJ and PTPRK constitute immediate regulatory mechanisms. Upon EGF-binding phosphorylates EPS15 that regulates EGFR endocytosis and activity. Moreover, inducible feedback inhibitors including LRIG1, SOCS4, SOCS5 and ERRFI1 constitute alternative regulatory mechanisms for the EGFR signaling. Up-regulated by NEU3-mediated desialylation of N-linked glycan at Asn-528"
+            }
+          ],
+          "commentType": "ACTIVITY REGULATION"
+        },
+        {
+          "commentType": "INTERACTION",
+          "interactions": [
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P00519",
+                "geneName": "ABL1",
+                "intActId": "EBI-375543"
+              },
+              "numberOfExperiments": 3,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P42684",
+                "geneName": "ABL2",
+                "intActId": "EBI-1102694"
+              },
+              "numberOfExperiments": 9,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q15109",
+                "geneName": "AGER",
+                "intActId": "EBI-1646426"
+              },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q9UKV8",
+                "geneName": "AGO2",
+                "intActId": "EBI-528269"
+              },
+              "numberOfExperiments": 11,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q09666",
+                "geneName": "AHNAK",
+                "intActId": "EBI-2555881"
+              },
+              "numberOfExperiments": 4,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "O00170",
+                "geneName": "AIP",
+                "intActId": "EBI-704197"
+              },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q02952",
+                "geneName": "AKAP12",
+                "intActId": "EBI-2562430"
+              },
+              "numberOfExperiments": 3,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P31749",
+                "geneName": "AKT1",
+                "intActId": "EBI-296087"
+              },
+              "numberOfExperiments": 4,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P49418",
+                "geneName": "AMPH",
+                "intActId": "EBI-7121510"
+              },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q92625",
+                "geneName": "ANKS1A",
+                "intActId": "EBI-1048612"
+              },
+              "numberOfExperiments": 7,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P04083",
+                "geneName": "ANXA1",
+                "intActId": "EBI-354007"
+              },
+              "numberOfExperiments": 3,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P07355",
+                "geneName": "ANXA2",
+                "intActId": "EBI-352622"
+              },
+              "numberOfExperiments": 4,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q10567",
+                "geneName": "AP1B1",
+                "intActId": "EBI-1171303"
+              },
+              "numberOfExperiments": 4,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q96CW1",
+                "geneName": "AP2M1",
+                "intActId": "EBI-297683"
+              },
+              "numberOfExperiments": 8,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "O00213",
+                "geneName": "APBB1",
+                "intActId": "EBI-81694"
+              },
+              "numberOfExperiments": 4,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q92870",
+                "geneName": "APBB2",
+                "intActId": "EBI-79277"
+              },
+              "numberOfExperiments": 7,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "O95704",
+                "geneName": "APBB3",
+                "intActId": "EBI-286427"
+              },
+              "numberOfExperiments": 2,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q9UKG1",
+                "geneName": "APPL1",
+                "intActId": "EBI-741243"
+              },
+              "numberOfExperiments": 3,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P49407",
+                "geneName": "ARRB1",
+                "intActId": "EBI-743313"
+              },
+              "numberOfExperiments": 3,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P32121",
+                "geneName": "ARRB2",
+                "intActId": "EBI-714559"
+              },
+              "numberOfExperiments": 3,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "O14965",
+                "geneName": "AURKA",
+                "intActId": "EBI-448680"
+              },
+              "numberOfExperiments": 5,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "P30530",
+                "geneName": "AXL",
+                "intActId": "EBI-2850927"
+              },
+              "numberOfExperiments": 5,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q9UQB8",
+                "geneName": "BAIAP2",
+                "intActId": "EBI-525456"
+              },
+              "numberOfExperiments": 4,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q9BXH1",
+                "geneName": "BBC3",
+                "intActId": "EBI-519884"
+              },
+              "numberOfExperiments": 10,
+              "organismDiffer": false
+            },
+            {
+              "interactantOne": { "uniProtKBAccession": "P00533", "intActId": "EBI-297353" },
+              "interactantTwo": {
+                "uniProtKBAccession": "Q14457",
+                "geneName": "BECN1",
+                "intActId": "EBI-949378"
+              },
+              "numberOfExperiments": 8,
+              "organismDiffer": false
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "type": "Topological domain",
+          "location": {
+            "start": { "value": 25, "modifier": "EXACT" },
+            "end": { "value": 645, "modifier": "EXACT" }
+          },
+          "description": "Extracellular",
+          "evidences": [{ "evidenceCode": "ECO:0000255" }]
+        },
+        {
+          "type": "Transmembrane",
+          "location": {
+            "start": { "value": 646, "modifier": "EXACT" },
+            "end": { "value": 668, "modifier": "EXACT" }
+          },
+          "description": "Helical",
+          "evidences": [{ "evidenceCode": "ECO:0000255" }]
+        },
+        {
+          "type": "Topological domain",
+          "location": {
+            "start": { "value": 669, "modifier": "EXACT" },
+            "end": { "value": 1210, "modifier": "EXACT" }
+          },
+          "description": "Cytoplasmic",
+          "evidences": [{ "evidenceCode": "ECO:0000255" }]
+        }
+      ]
+    }
+  ]
+}

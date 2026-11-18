@@ -2,7 +2,7 @@
  * @fileoverview uniprot://entry/{accession} — a curated UniProtKB entry by
  *   accession, the injectable-context mirror of uniprot_get_entry's single
  *   accession path. Tool-only clients lose nothing: the same record is reachable
- *   via uniprot_get_entry. Annotation-heavy entries (P04637 serializes to ~360 KB)
+ *   via uniprot_get_entry. Annotation-heavy entries (P04637 serializes to ~420 KB across both output surfaces)
  *   would otherwise inject the whole high-cardinality record; when one exceeds the
  *   outline budget this returns a bounded identity summary plus a section outline
  *   (names + byte sizes) and points to uniprot_get_entry for specific sections —
@@ -36,7 +36,7 @@ const IDENTITY_FIELDS = [
 export const entryResource = resource('uniprot://entry/{accession}', {
   name: 'UniProtKB entry',
   description:
-    'A curated UniProtKB entry by accession — function, catalytic activity, disease, variants, GO terms, and cross-references. The resource mirror of uniprot_get_entry for a single accession. An inactive accession (merged, demerged, or deleted) fails not_found with a message naming its replacement. An annotation-heavy entry over the outline budget returns a bounded identity summary plus a section outline (names + byte sizes) instead of the full record — fetch specific sections with the uniprot_get_entry tool (sections:[...]).',
+    'A curated UniProtKB entry by accession: the default uniprot_get_entry record — names and EC numbers, function, catalytic activity, active and binding sites, location and membrane topology, disease, PTMs and processing, variants, isoforms, domains, free-text comments, GO terms, keywords, and cross-references. It leaves out mutagenesis and interaction partners; fetch those with the uniprot_get_entry tool (sections:["mutagenesis"] or sections:["interactions"]). The resource mirror of uniprot_get_entry for a single accession. An inactive accession (merged, demerged, or deleted) fails not_found with a message naming its replacement. An annotation-heavy entry over the outline budget returns a bounded identity summary plus a section outline (names + byte sizes) instead of the full record — fetch specific sections with the uniprot_get_entry tool (sections:[...]).',
   mimeType: 'application/json',
   params: z.object({
     accession: z

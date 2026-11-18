@@ -1,0 +1,813 @@
+{
+  "results": [
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P07477",
+      "uniProtkbId": "TRY1_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "evidences": [{ "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:9475" }],
+            "value": "Serine protease 1"
+          },
+          "ecNumbers": [{ "value": "3.4.21.4" }]
+        },
+        "alternativeNames": [
+          {
+            "fullName": {
+              "evidences": [
+                { "evidenceCode": "ECO:0000250", "source": "UniProtKB", "id": "P00762" }
+              ],
+              "value": "Anionic trypsin I"
+            }
+          },
+          {
+            "fullName": {
+              "evidences": [
+                { "evidenceCode": "ECO:0000250", "source": "UniProtKB", "id": "P00762" }
+              ],
+              "value": "Anionic trypsin-I"
+            }
+          },
+          { "fullName": { "value": "Beta-trypsin" } },
+          { "fullName": { "value": "Cationic trypsinogen" } },
+          {
+            "fullName": {
+              "evidences": [
+                { "evidenceCode": "ECO:0000250", "source": "UniProtKB", "id": "P00762" }
+              ],
+              "value": "Pretrypsinogen I"
+            }
+          },
+          {
+            "fullName": {
+              "evidences": [{ "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:9475" }],
+              "value": "Trypsin I"
+            }
+          },
+          { "fullName": { "value": "Trypsin-1" } }
+        ],
+        "contains": [
+          { "recommendedName": { "fullName": { "value": "Alpha-trypsin chain 1" } } },
+          { "recommendedName": { "fullName": { "value": "Alpha-trypsin chain 2" } } }
+        ],
+        "flag": "Precursor"
+      },
+      "genes": [
+        {
+          "geneName": {
+            "evidences": [{ "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:9475" }],
+            "value": "PRSS1"
+          },
+          "synonyms": [
+            { "value": "TRP1" },
+            {
+              "evidences": [{ "evidenceCode": "ECO:0000312", "source": "HGNC", "id": "HGNC:9475" }],
+              "value": "TRY1"
+            },
+            { "value": "TRYP1" }
+          ]
+        }
+      ],
+      "comments": [
+        {
+          "texts": [
+            {
+              "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7945238" }],
+              "value": "Has activity against the synthetic substrates Boc-Phe-Ser-Arg-Mec, Boc-Leu-Thr-Arg-Mec, Boc-Gln-Ala-Arg-Mec and Boc-Val-Pro-Arg-Mec. The single-chain form is more active than the two-chain form against all of these substrates"
+            }
+          ],
+          "commentType": "FUNCTION"
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "reaction": {
+            "name": "Preferential cleavage: Arg-|-Xaa, Lys-|-Xaa.",
+            "ecNumber": "3.4.21.4"
+          }
+        },
+        {
+          "commentType": "COFACTOR",
+          "cofactors": [
+            {
+              "name": "Ca(2+)",
+              "cofactorCrossReference": { "database": "ChEBI", "id": "CHEBI:29108" }
+            }
+          ],
+          "note": { "texts": [{ "value": "Binds 1 Ca(2+) ion per subunit." }] }
+        },
+        {
+          "texts": [
+            {
+              "evidences": [
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11057674" }
+              ],
+              "value": "Interacts with SERPINA1"
+            }
+          ],
+          "commentType": "SUBUNIT"
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "subcellularLocations": [
+            { "location": { "value": "Secreted, extracellular space", "id": "SL-0112" } }
+          ]
+        },
+        {
+          "texts": [
+            {
+              "value": "Occurs in a single-chain form and a two-chain form, produced by proteolytic cleavage after Arg-122"
+            }
+          ],
+          "commentType": "PTM"
+        },
+        {
+          "texts": [
+            {
+              "evidences": [
+                { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "25010489" }
+              ],
+              "value": "Sulfation at Tyr-154 increases selectivity towards basic versus apolar residues at the P2' position of inhibitors that bind in a substrate-like fashion. Although the increase in selectivity is relatively small, it may facilitate digestion of a broader range of dietary proteins"
+            }
+          ],
+          "commentType": "PTM"
+        },
+        {
+          "commentType": "DISEASE",
+          "disease": {
+            "diseaseId": "Pancreatitis, hereditary",
+            "diseaseAccession": "DI-01731",
+            "acronym": "PCTT",
+            "description": "A disease characterized by pancreas inflammation, permanent destruction of the pancreatic parenchyma, maldigestion, and severe abdominal pain attacks.",
+            "diseaseCrossReference": { "database": "MIM", "id": "167800" },
+            "evidences": [
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10204851" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10381903" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10930381" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11073545" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11788572" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11866271" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "14695529" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "15776435" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "8841182" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "9322498" },
+              { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "9633818" }
+            ]
+          },
+          "note": {
+            "texts": [
+              {
+                "value": "Disease susceptibility is associated with variants affecting the gene represented in this entry"
+              }
+            ]
+          }
+        }
+      ],
+      "features": [
+        {
+          "type": "Signal",
+          "location": {
+            "start": { "value": 1, "modifier": "EXACT" },
+            "end": { "value": 15, "modifier": "EXACT" }
+          },
+          "description": "",
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "2598466" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "7945238" }
+          ]
+        },
+        {
+          "type": "Propeptide",
+          "location": {
+            "start": { "value": 16, "modifier": "EXACT" },
+            "end": { "value": 23, "modifier": "EXACT" }
+          },
+          "description": "Activation peptide",
+          "featureId": "PRO_0000028197"
+        },
+        {
+          "type": "Chain",
+          "location": {
+            "start": { "value": 24, "modifier": "EXACT" },
+            "end": { "value": 247, "modifier": "EXACT" }
+          },
+          "description": "Serine protease 1",
+          "featureId": "PRO_0000028198"
+        },
+        {
+          "type": "Chain",
+          "location": {
+            "start": { "value": 24, "modifier": "EXACT" },
+            "end": { "value": 122, "modifier": "EXACT" }
+          },
+          "description": "Alpha-trypsin chain 1",
+          "featureId": "PRO_0000313570"
+        },
+        {
+          "type": "Chain",
+          "location": {
+            "start": { "value": 123, "modifier": "EXACT" },
+            "end": { "value": 247, "modifier": "EXACT" }
+          },
+          "description": "Alpha-trypsin chain 2",
+          "featureId": "PRO_0000313571"
+        },
+        {
+          "type": "Domain",
+          "location": {
+            "start": { "value": 24, "modifier": "EXACT" },
+            "end": { "value": 244, "modifier": "EXACT" }
+          },
+          "description": "Peptidase S1",
+          "evidences": [
+            { "evidenceCode": "ECO:0000255", "source": "PROSITE-ProRule", "id": "PRU00274" }
+          ]
+        },
+        {
+          "type": "Active site",
+          "location": {
+            "start": { "value": 63, "modifier": "EXACT" },
+            "end": { "value": 63, "modifier": "EXACT" }
+          },
+          "description": "Charge relay system"
+        },
+        {
+          "type": "Active site",
+          "location": {
+            "start": { "value": 107, "modifier": "EXACT" },
+            "end": { "value": 107, "modifier": "EXACT" }
+          },
+          "description": "Charge relay system"
+        },
+        {
+          "type": "Active site",
+          "location": {
+            "start": { "value": 200, "modifier": "EXACT" },
+            "end": { "value": 200, "modifier": "EXACT" }
+          },
+          "description": "Charge relay system"
+        },
+        {
+          "type": "Binding site",
+          "location": {
+            "start": { "value": 75, "modifier": "EXACT" },
+            "end": { "value": 75, "modifier": "EXACT" }
+          },
+          "description": "",
+          "featureCrossReferences": [{ "database": "ChEBI", "id": "CHEBI:29108" }],
+          "ligand": { "name": "Ca(2+)", "id": "ChEBI:CHEBI:29108" }
+        },
+        {
+          "type": "Binding site",
+          "location": {
+            "start": { "value": 77, "modifier": "EXACT" },
+            "end": { "value": 77, "modifier": "EXACT" }
+          },
+          "description": "",
+          "featureCrossReferences": [{ "database": "ChEBI", "id": "CHEBI:29108" }],
+          "ligand": { "name": "Ca(2+)", "id": "ChEBI:CHEBI:29108" }
+        },
+        {
+          "type": "Binding site",
+          "location": {
+            "start": { "value": 80, "modifier": "EXACT" },
+            "end": { "value": 80, "modifier": "EXACT" }
+          },
+          "description": "",
+          "featureCrossReferences": [{ "database": "ChEBI", "id": "CHEBI:29108" }],
+          "ligand": { "name": "Ca(2+)", "id": "ChEBI:CHEBI:29108" }
+        },
+        {
+          "type": "Binding site",
+          "location": {
+            "start": { "value": 85, "modifier": "EXACT" },
+            "end": { "value": 85, "modifier": "EXACT" }
+          },
+          "description": "",
+          "featureCrossReferences": [{ "database": "ChEBI", "id": "CHEBI:29108" }],
+          "ligand": { "name": "Ca(2+)", "id": "ChEBI:CHEBI:29108" }
+        },
+        {
+          "type": "Site",
+          "location": {
+            "start": { "value": 194, "modifier": "EXACT" },
+            "end": { "value": 194, "modifier": "EXACT" }
+          },
+          "description": "Required for specificity",
+          "evidences": [{ "evidenceCode": "ECO:0000250" }]
+        },
+        {
+          "type": "Modified residue",
+          "location": {
+            "start": { "value": 154, "modifier": "EXACT" },
+            "end": { "value": 154, "modifier": "EXACT" }
+          },
+          "description": "Sulfotyrosine",
+          "evidences": [
+            { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "17087724" },
+            { "evidenceCode": "ECO:0000305", "source": "PubMed", "id": "25010489" }
+          ]
+        },
+        {
+          "type": "Disulfide bond",
+          "location": {
+            "start": { "value": 30, "modifier": "EXACT" },
+            "end": { "value": 160, "modifier": "EXACT" }
+          },
+          "description": ""
+        },
+        {
+          "type": "Disulfide bond",
+          "location": {
+            "start": { "value": 48, "modifier": "EXACT" },
+            "end": { "value": 64, "modifier": "EXACT" }
+          },
+          "description": ""
+        },
+        {
+          "type": "Disulfide bond",
+          "location": {
+            "start": { "value": 139, "modifier": "EXACT" },
+            "end": { "value": 206, "modifier": "EXACT" }
+          },
+          "description": ""
+        },
+        {
+          "type": "Disulfide bond",
+          "location": {
+            "start": { "value": 171, "modifier": "EXACT" },
+            "end": { "value": 185, "modifier": "EXACT" }
+          },
+          "description": ""
+        },
+        {
+          "type": "Disulfide bond",
+          "location": {
+            "start": { "value": 196, "modifier": "EXACT" },
+            "end": { "value": 220, "modifier": "EXACT" }
+          },
+          "description": ""
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 16, "modifier": "EXACT" },
+            "end": { "value": 16, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; disrupts signal sequence cleavage site; dbSNP:rs202003805",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs202003805" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10381903" }],
+          "featureId": "VAR_011693",
+          "alternativeSequence": { "originalSequence": "A", "alternativeSequences": ["V"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 22, "modifier": "EXACT" },
+            "end": { "value": 22, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; increased rate of activation; dbSNP:rs397507442",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs397507442" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10930381" }],
+          "featureId": "VAR_011652",
+          "alternativeSequence": { "originalSequence": "D", "alternativeSequences": ["G"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 23, "modifier": "EXACT" },
+            "end": { "value": 23, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; increased rate of activation; dbSNP:rs111033567",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs111033567" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10204851" }],
+          "featureId": "VAR_011653",
+          "alternativeSequence": { "originalSequence": "K", "alternativeSequences": ["R"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 29, "modifier": "EXACT" },
+            "end": { "value": 29, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; dbSNP:rs111033566",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs111033566" }],
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11866271" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "15776435" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "9322498" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "9633818" }
+          ],
+          "featureId": "VAR_006720",
+          "alternativeSequence": { "originalSequence": "N", "alternativeSequences": ["I"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 29, "modifier": "EXACT" },
+            "end": { "value": 29, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; dbSNP:rs111033566",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs111033566" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11788572" }],
+          "featureId": "VAR_012712",
+          "alternativeSequence": { "originalSequence": "N", "alternativeSequences": ["T"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 54, "modifier": "EXACT" },
+            "end": { "value": 54, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; associated with Ile-29; the double mutant shows increased autocatalytic activation which is solely due to the Ile-29 mutation; dbSNP:rs144422014",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs144422014" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "15776435" }],
+          "featureId": "VAR_037908",
+          "alternativeSequence": { "originalSequence": "N", "alternativeSequences": ["S"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 79, "modifier": "EXACT" },
+            "end": { "value": 79, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; Lys-79 trypsin activates anionic trypsinogen PRSS2 2-fold while the common pancreatitis-associated mutants His-122 or Ile-29 have no such effect; dbSNP:rs111033564",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs111033564" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "14695529" }],
+          "featureId": "VAR_037909",
+          "alternativeSequence": { "originalSequence": "E", "alternativeSequences": ["K"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 104, "modifier": "EXACT" },
+            "end": { "value": 104, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; dbSNP:rs1554499091",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs1554499091" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11866271" }],
+          "featureId": "VAR_011654",
+          "alternativeSequence": { "originalSequence": "L", "alternativeSequences": ["P"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 116, "modifier": "EXACT" },
+            "end": { "value": 116, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; dbSNP:rs387906698",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs387906698" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11866271" }],
+          "featureId": "VAR_011655",
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["C"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 122, "modifier": "EXACT" },
+            "end": { "value": 122, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; suppresses an autocleavage site; dbSNP:rs111033568",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs111033568" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11788572" }],
+          "featureId": "VAR_012713",
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["C"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 122, "modifier": "EXACT" },
+            "end": { "value": 122, "modifier": "EXACT" }
+          },
+          "description": "in PCTT; suppresses an autocleavage site which is probably part of a fail-safe mechanism by which trypsin, which is activated within the pancreas, may be inactivated; loss of this cleavage site would permit autodigestion resulting in pancreatitis; dbSNP:rs267606982",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs267606982" }],
+          "evidences": [
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "10381903" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11073545" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11866271" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "8841182" },
+            { "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "9322498" }
+          ],
+          "featureId": "VAR_006721",
+          "alternativeSequence": { "originalSequence": "R", "alternativeSequences": ["H"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 137, "modifier": "EXACT" },
+            "end": { "value": 137, "modifier": "EXACT" }
+          },
+          "description": "in a colorectal cancer sample; somatic mutation; dbSNP:rs117497341",
+          "featureCrossReferences": [{ "database": "dbSNP", "id": "rs117497341" }],
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "16959974" }],
+          "featureId": "VAR_036299",
+          "alternativeSequence": { "originalSequence": "T", "alternativeSequences": ["M"] }
+        },
+        {
+          "type": "Natural variant",
+          "location": {
+            "start": { "value": 139, "modifier": "EXACT" },
+            "end": { "value": 139, "modifier": "EXACT" }
+          },
+          "description": "in PCTT",
+          "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "11866271" }],
+          "featureId": "VAR_011656",
+          "alternativeSequence": { "originalSequence": "C", "alternativeSequences": ["F"] }
+        }
+      ],
+      "keywords": [
+        { "id": "KW-0002", "category": "Technical term", "name": "3D-structure" },
+        { "id": "KW-0106", "category": "Ligand", "name": "Calcium" },
+        { "id": "KW-0222", "category": "Biological process", "name": "Digestion" },
+        { "id": "KW-0903", "category": "Technical term", "name": "Direct protein sequencing" },
+        { "id": "KW-0225", "category": "Disease", "name": "Disease variant" },
+        { "id": "KW-1015", "category": "PTM", "name": "Disulfide bond" },
+        { "id": "KW-0378", "category": "Molecular function", "name": "Hydrolase" },
+        { "id": "KW-0479", "category": "Ligand", "name": "Metal-binding" },
+        { "id": "KW-0645", "category": "Molecular function", "name": "Protease" },
+        { "id": "KW-1267", "category": "Technical term", "name": "Proteomics identification" },
+        { "id": "KW-1185", "category": "Technical term", "name": "Reference proteome" },
+        { "id": "KW-0964", "category": "Cellular component", "name": "Secreted" },
+        { "id": "KW-0720", "category": "Molecular function", "name": "Serine protease" },
+        { "id": "KW-0732", "category": "Domain", "name": "Signal" },
+        { "id": "KW-0765", "category": "PTM", "name": "Sulfation" },
+        { "id": "KW-0865", "category": "PTM", "name": "Zymogen" }
+      ],
+      "uniProtKBCrossReferences": [
+        {
+          "database": "RefSeq",
+          "id": "NP_002760.1",
+          "properties": [{ "key": "NucleotideSequenceId", "value": "NM_002769.5" }]
+        },
+        {
+          "database": "PDB",
+          "id": "1FXY",
+          "properties": [
+            { "key": "Method", "value": "X-ray" },
+            { "key": "Resolution", "value": "2.15 A" },
+            { "key": "Chains", "value": "A=127-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "1TRN",
+          "properties": [
+            { "key": "Method", "value": "X-ray" },
+            { "key": "Resolution", "value": "2.20 A" },
+            { "key": "Chains", "value": "A/B=24-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "2RA3",
+          "properties": [
+            { "key": "Method", "value": "X-ray" },
+            { "key": "Resolution", "value": "1.46 A" },
+            { "key": "Chains", "value": "A/B=24-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "4WWY",
+          "properties": [
+            { "key": "Method", "value": "X-ray" },
+            { "key": "Resolution", "value": "1.70 A" },
+            { "key": "Chains", "value": "A/B=24-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "4WXV",
+          "properties": [
+            { "key": "Method", "value": "X-ray" },
+            { "key": "Resolution", "value": "2.10 A" },
+            { "key": "Chains", "value": "A/B=24-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "7QE8",
+          "properties": [
+            { "key": "Method", "value": "X-ray" },
+            { "key": "Resolution", "value": "2.90 A" },
+            { "key": "Chains", "value": "A/B=24-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "7QE9",
+          "properties": [
+            { "key": "Method", "value": "X-ray" },
+            { "key": "Resolution", "value": "2.10 A" },
+            { "key": "Chains", "value": "A/B=24-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "8H3S",
+          "properties": [
+            { "key": "Method", "value": "EM" },
+            { "key": "Resolution", "value": "4.90 A" },
+            { "key": "Chains", "value": "C=16-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "8ZI4",
+          "properties": [
+            { "key": "Method", "value": "EM" },
+            { "key": "Resolution", "value": "2.95 A" },
+            { "key": "Chains", "value": "C=16-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "8ZIV",
+          "properties": [
+            { "key": "Method", "value": "EM" },
+            { "key": "Resolution", "value": "2.95 A" },
+            { "key": "Chains", "value": "C=16-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "8ZIY",
+          "properties": [
+            { "key": "Method", "value": "EM" },
+            { "key": "Resolution", "value": "2.64 A" },
+            { "key": "Chains", "value": "C=16-247" }
+          ]
+        },
+        {
+          "database": "PDB",
+          "id": "8ZJ4",
+          "properties": [
+            { "key": "Method", "value": "EM" },
+            { "key": "Resolution", "value": "2.67 A" },
+            { "key": "Chains", "value": "C=16-247" }
+          ]
+        },
+        {
+          "database": "AlphaFoldDB",
+          "id": "P07477",
+          "properties": [{ "key": "Description", "value": "-" }]
+        },
+        {
+          "database": "STRING",
+          "id": "9606.ENSP00000308720",
+          "properties": [{ "key": "Description", "value": "-" }]
+        },
+        {
+          "database": "ChEMBL",
+          "id": "CHEMBL209",
+          "properties": [{ "key": "Description", "value": "-" }]
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000311737.12",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000308720.7" },
+            { "key": "GeneId", "value": "ENSG00000204983.15" }
+          ]
+        },
+        {
+          "database": "Ensembl",
+          "id": "ENST00000616256.4",
+          "properties": [
+            { "key": "ProteinId", "value": "ENSP00000479217.1" },
+            { "key": "GeneId", "value": "ENSG00000274247.4" }
+          ]
+        },
+        {
+          "database": "GeneID",
+          "id": "5644",
+          "properties": [{ "key": "Description", "value": "-" }]
+        },
+        {
+          "database": "HGNC",
+          "id": "HGNC:9475",
+          "properties": [{ "key": "GeneName", "value": "PRSS1" }]
+        },
+        {
+          "database": "MIM",
+          "id": "167800",
+          "properties": [{ "key": "Type", "value": "phenotype" }]
+        },
+        { "database": "MIM", "id": "276000", "properties": [{ "key": "Type", "value": "gene" }] },
+        {
+          "database": "GO",
+          "id": "GO:0072562",
+          "properties": [
+            { "key": "GoTerm", "value": "C:blood microparticle" },
+            { "key": "GoEvidenceType", "value": "HDA:UniProtKB" }
+          ],
+          "evidences": [{ "evidenceCode": "ECO:0007005", "source": "PubMed", "id": "22516433" }]
+        },
+        {
+          "database": "GO",
+          "id": "GO:0031012",
+          "properties": [
+            { "key": "GoTerm", "value": "C:extracellular matrix" },
+            { "key": "GoEvidenceType", "value": "HDA:BHF-UCL" }
+          ],
+          "evidences": [{ "evidenceCode": "ECO:0007005", "source": "PubMed", "id": "28675934" }]
+        },
+        {
+          "database": "GO",
+          "id": "GO:0005576",
+          "properties": [
+            { "key": "GoTerm", "value": "C:extracellular region" },
+            { "key": "GoEvidenceType", "value": "IBA:GO_Central" }
+          ]
+        },
+        {
+          "database": "GO",
+          "id": "GO:0004252",
+          "properties": [
+            { "key": "GoTerm", "value": "F:serine-type endopeptidase activity" },
+            { "key": "GoEvidenceType", "value": "IBA:GO_Central" }
+          ]
+        },
+        {
+          "database": "GO",
+          "id": "GO:0022617",
+          "properties": [
+            { "key": "GoTerm", "value": "P:extracellular matrix disassembly" },
+            { "key": "GoEvidenceType", "value": "TAS:Reactome" }
+          ]
+        },
+        {
+          "database": "GO",
+          "id": "GO:0006508",
+          "properties": [
+            { "key": "GoTerm", "value": "P:proteolysis" },
+            { "key": "GoEvidenceType", "value": "IBA:GO_Central" }
+          ]
+        },
+        {
+          "database": "InterPro",
+          "id": "IPR009003",
+          "properties": [{ "key": "EntryName", "value": "Peptidase_S1_PA" }]
+        },
+        {
+          "database": "InterPro",
+          "id": "IPR001314",
+          "properties": [{ "key": "EntryName", "value": "Peptidase_S1A" }]
+        },
+        {
+          "database": "InterPro",
+          "id": "IPR050127",
+          "properties": [{ "key": "EntryName", "value": "Serine_Proteases_S1" }]
+        },
+        {
+          "database": "InterPro",
+          "id": "IPR001254",
+          "properties": [{ "key": "EntryName", "value": "Trypsin_dom" }]
+        },
+        {
+          "database": "InterPro",
+          "id": "IPR018114",
+          "properties": [{ "key": "EntryName", "value": "TRYPSIN_HIS" }]
+        },
+        {
+          "database": "InterPro",
+          "id": "IPR033116",
+          "properties": [{ "key": "EntryName", "value": "TRYPSIN_SER" }]
+        },
+        {
+          "database": "Pfam",
+          "id": "PF00089",
+          "properties": [
+            { "key": "EntryName", "value": "Trypsin" },
+            { "key": "MatchStatus", "value": "1" }
+          ]
+        }
+      ],
+      "sequence": { "length": 247 },
+      "extraAttributes": { "uniParcId": "UPI0000001309" }
+    }
+  ]
+}

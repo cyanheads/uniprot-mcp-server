@@ -4,6 +4,13 @@
     "args": ["-y", "@cyanheads/uniprot-mcp-server"],
     "env": {
       "MCP_TRANSPORT_TYPE": "stdio"
-    }
+    },
+    "env_vars": [
+      "UNIPROT_BASE_URL",
+      "UNIPROT_TIMEOUT_MS",
+      "UNIPROT_ID_MAPPING_BUDGET_MS",
+      "UNIPROT_DEFAULT_PAGE_SIZE",
+      "UNIPROT_CLAMP_LIMITS"
+    ]
   }
 }

@@ -18,4 +18,13 @@ Parenthesize alternatives before adding constraints. `(gene_exact:gyrA OR gene_e
 
 The query controls which records match. The return-field projection controls which data UniProt sends for those records. These vocabularies differ: the exact-gene query uses `gene_exact`, while a primary-gene return field is `gene_primary`. Choosing a small projection does not narrow the result set.
 
+Each tool returns only the fields it can render, and says so when a request names others:
+
+| Tool | `fields` | A name it cannot return |
+| --- | --- | --- |
+| `uniprot_search_proteins` | Trims each hit to name, gene (including `gene_oln` and `gene_orf`), organism, length, provenance, and `cc_function`. | Left out of the request and listed in `ignoredFields`; the notice points to `uniprot_get_entry`. |
+| `uniprot_get_entry` | Replaces the default record, which already carries features, comments, and cross-references for every entry section except `mutagenesis` (`ft_mutagen`) and `interactions` (`cc_interaction`). Any `xref_<database>` adds that database to `xrefs`. | Left out of the request and listed in `ignoredFields` (`sequence` belongs to `uniprot_get_sequence`). |
+
+Return-field names are case-insensitive. Text that is not a field name, or a malformed `xref_` name, is rejected with UniProt's message.
+
 When a query is rejected, fix the field or syntax named in the error rather than moving the expression into the plain-text input. Consult the current [UniProt query-field reference](https://www.uniprot.org/help/query-fields) for fields beyond these examples.
