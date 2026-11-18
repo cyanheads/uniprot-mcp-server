@@ -827,6 +827,9 @@ describe('UniProtService — bounded function snippet (#36)', () => {
         '(PubMed:1) Binds DNA.',
         'Binds DNA (PubMed:1',
         'Binds DNA (PubMed:1 (see text)) as shown',
+        'Seen (Ref.12) and (Ref.345, Ref.6) here',
+        'Seen (Ref.x) here',
+        'Seen (Ref.12345',
       ),
     ).toEqual([
       'Acts as a tumor suppressor.',
@@ -835,6 +838,9 @@ describe('UniProtService — bounded function snippet (#36)', () => {
       'Binds DNA.',
       'Binds DNA (PubMed:1',
       'Binds DNA (PubMed:1 (see text)) as shown',
+      'Seen and here',
+      'Seen (Ref.x) here',
+      'Seen (Ref.12345',
     ]);
   });
 

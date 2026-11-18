@@ -205,8 +205,13 @@ export function isCursorRejection(err: unknown): boolean {
   );
 }
 
-/** An evidence parenthetical: matched only at `(`, its body stopping at the next parenthesis. */
-const EVIDENCE_TAG = /\((?:PubMed|UniProtKB|Ref\.\d+|By similarity|Probable)[^()]*\)/g;
+/**
+ * An evidence parenthetical: matched only at `(`, its body stopping at the next
+ * parenthesis. `Ref.` takes a single digit and leaves the rest to the body: a
+ * `\d+` there would compete with the body for every digit and backtrack
+ * quadratically over an unclosed `(Ref.` digit run.
+ */
+const EVIDENCE_TAG = /\((?:PubMed|UniProtKB|Ref\.\d|By similarity|Probable)[^()]*\)/g;
 
 /**
  * Strip evidence-reference parentheticals (e.g. `(PubMed:12345)`) and the
