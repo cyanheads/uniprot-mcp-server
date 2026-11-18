@@ -122,8 +122,8 @@ type Entry = {
   accession: string; entryName: string; proteinName: string | null;
   genes: string[]; organism: Organism; length: number;  // organism.mnemonic from the entry name (HUMAN)
   reviewed: boolean; annotationScore: number; proteinExistence: string;
-  alternativeNames?: string[];         // protein_name alternative / short names
-  ecNumbers?: string[];                // ec
+  alternativeNames?: string[];         // protein_name (alternative full names)
+  ecNumbers?: string[];                // protein_name or ec (the recommended name's EC numbers)
   function?: EvidencedText[];          // cc_function
   catalyticActivity?: Reaction[];      // cc_catalytic_activity (Rhea xrefs)
   cofactors?: Cofactor[];              // cc_cofactor (ChEBI)
