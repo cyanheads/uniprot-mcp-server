@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.4.1](changelog/0.4.x/0.4.1.md) — 2026-11-17
+
+uniprot_get_entry measures each record against the 24,000-byte budget on its own and returns site, topology, processing, comment, mutagenesis, and interaction sections; over-the-cap size, section_limit, and accession counts are served up to the cap, and functionSnippet is bounded.
+
 ## [0.4.0](changelog/0.4.x/0.4.0.md) — 2026-11-03
 
 Publishes the uniprot-guide skill over MCP, searches species through descendant strains, matches taxonomy names exactly, escapes plain-text search, and adds UniProtKB target identity, job totals, and failure reasons to uniprot_map_ids.
