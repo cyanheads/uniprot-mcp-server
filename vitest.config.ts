@@ -17,6 +17,8 @@ export default mergeConfig(
   defineConfig({
     resolve: { alias },
     test: {
+      // Vitest's fork watchdog calls ChildProcess.channel.unref(), unavailable on Bun.
+      ...(process.versions.bun && { pool: 'threads' }),
       coverage: {
         // src/index.ts is the composition root (createApp wiring only) — exercised by a running server, not by unit tests.
         exclude: ['src/index.ts'],

@@ -20,6 +20,7 @@
 /devcheck.config.json
 /logs/
 /.cache/
+/node_modules/.vitest-cache/
 /coverage/
 /tests/
 /Dockerfile
