@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.4.2](changelog/0.4.x/0.4.2.md) — 2026-11-23
+
+uniprot_get_entry keeps the isoform or chain, evidence, and uncertain positions UniProt attaches to annotations, adds a biophysicochemical section and a residue filter; proteomes report gene counts; uniprot_map_ids pages by size and polls tickets; searches by merged accession keep their stubs under the default filters.
+
 ## [0.4.1](changelog/0.4.x/0.4.1.md) — 2026-11-17
 
 uniprot_get_entry measures each record against the 24,000-byte budget on its own and returns site, topology, processing, comment, mutagenesis, and interaction sections; over-the-cap size, section_limit, and accession counts are served up to the cap, and functionSnippet is bounded.

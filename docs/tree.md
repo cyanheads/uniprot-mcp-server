@@ -1,6 +1,6 @@
 # uniprot-mcp-server - Directory Structure
 
-Generated on: 2026-11-18 05:21:34
+Generated on: 2026-11-23 16:18:40
 
 ```text
 uniprot-mcp-server/
@@ -163,11 +163,13 @@ uniprot-mcp-server/
 │   │       │   ├── uniprot-get-taxonomy.tool.ts
 │   │       │   ├── uniprot-map-ids.tool.ts
 │   │       │   └── uniprot-search-proteins.tool.ts
-│   │       └── input-limits.ts
+│   │       ├── input-limits.ts
+│   │       └── protein-format.ts
 │   ├── services/
 │   │   └── uniprot/
 │   │       ├── proteome-query.ts
 │   │       ├── query-cursor.ts
+│   │       ├── residue-coverage.ts
 │   │       ├── return-fields.ts
 │   │       ├── types.ts
 │   │       └── uniprot-service.ts
@@ -176,11 +178,15 @@ uniprot-mcp-server/
 │   ├── config/
 │   │   └── server-config.test.ts
 │   ├── fixtures/
+│   │   ├── biophysicochemical.json
+│   │   ├── feature-locations.json
 │   │   ├── p00533-mutagenesis.json
 │   │   ├── p00533-sections.json
 │   │   ├── p00918-xrefs.json
 │   │   ├── p04637-sections.json
 │   │   ├── p07477-default.json
+│   │   ├── qualified-comments.json
+│   │   ├── residue-coverage.json
 │   │   └── section-rows.json
 │   ├── prompts/
 │   │   └── uniprot-protein-dossier.prompt.test.ts
@@ -190,8 +196,10 @@ uniprot-mcp-server/
 │   ├── services/
 │   │   ├── bundle-agent-docs.test.ts
 │   │   ├── query-cursor.test.ts
+│   │   ├── residue-coverage.test.ts
 │   │   ├── return-fields.test.ts
 │   │   ├── taxonomy-deadline.test.ts
+│   │   ├── types.test.ts
 │   │   ├── uniprot-mapping.test.ts
 │   │   └── uniprot-service.test.ts
 │   ├── tools/
