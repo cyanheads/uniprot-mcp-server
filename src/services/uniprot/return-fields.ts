@@ -9,40 +9,20 @@
  */
 
 /**
- * UniProtKB fields that back the required (non-optional) columns of the entry
- * output schema. UniProt only returns `id`, `length`, `annotation_score`,
+ * UniProtKB fields that back the identity and provenance columns of an entry
+ * and a search hit. UniProt only returns `id`, `length`, `annotation_score`,
  * `protein_existence`, and the organism fields when they are explicitly
  * requested, so a caller-supplied `fields` that omits them would otherwise drop
  * `entryName` (a hard schema-validation crash) or silently fabricate
- * provenance (`0` score, `unknown` existence). These are always merged into the
- * upstream request so a custom `fields` trims sections without dropping identity.
+ * provenance (`0` score, `unknown` existence). `protein_name` carries the
+ * sequence flags (Fragment, Precursor) that qualify `length`. These are always
+ * merged into the upstream request so a custom `fields` trims sections without
+ * dropping identity.
  */
-const MANDATORY_ENTRY_FIELDS = [
+const MANDATORY_FIELDS = [
   'accession',
   'id',
   'protein_name',
-  'gene_names',
-  'organism_name',
-  'organism_id',
-  'length',
-  'reviewed',
-  'annotation_score',
-  'protein_existence',
-] as const;
-
-/**
- * UniProtKB fields that back the required (non-optional) columns of the search
- * output schema (`ProteinHit`). Mirrors `MANDATORY_ENTRY_FIELDS` minus
- * `protein_name` (optional on a hit). UniProt omits `id`, `length`, organism,
- * `annotation_score`, `protein_existence`, and `reviewed` unless explicitly
- * requested, so a caller-supplied `fields` (e.g. `accession,gene_names`) that
- * drops them would crash on the missing `entryName` or fabricate provenance.
- * Always merged into the upstream search request so a custom `fields` trims the
- * projection without dropping the identity/provenance columns.
- */
-const MANDATORY_SEARCH_FIELDS = [
-  'accession',
-  'id',
   'gene_names',
   'organism_name',
   'organism_id',
@@ -70,10 +50,15 @@ const DEFAULT_SEARCH_FIELDS =
  * GeneID, STRING); any other database is one `xref_<database>` field away.
  */
 const DEFAULT_ENTRY_FIELDS = [
-  ...MANDATORY_ENTRY_FIELDS,
+  ...MANDATORY_FIELDS,
   'cc_function',
   'cc_catalytic_activity',
   'cc_cofactor',
+  'kinetics',
+  'ph_dependence',
+  'temp_dependence',
+  'redox_potential',
+  'absorption',
   'cc_subcellular_location',
   'cc_disease',
   'ft_mod_res',
@@ -159,6 +144,12 @@ const ENTRY_RETURN_FIELDS: readonly string[] = [
   'cc_disease',
   'cc_alternative_products',
   'cc_interaction',
+  // biophysicochemical: any one of these returns the whole BIOPHYSICOCHEMICAL PROPERTIES comment
+  'kinetics',
+  'ph_dependence',
+  'temp_dependence',
+  'redox_potential',
+  'absorption',
   // comments: the free-text annotations (protein_families is the SIMILARITY text)
   'cc_activity_regulation',
   'cc_allergen',
@@ -349,23 +340,19 @@ export function searchFieldRequest(fields: string | undefined): FieldRequest {
  * `fields` is undefined, else its names behind the mandatory columns. An empty
  * `fields` — every name split off as ignored — sends the mandatory columns alone.
  */
-function fieldsParam(
-  fields: string | undefined,
-  defaults: string,
-  mandatory: readonly string[],
-): string {
+function fieldsParam(fields: string | undefined, defaults: string): string {
   if (fields === undefined) return defaults;
-  return [...new Set([...mandatory, ...fieldTokens(fields)])].join(',');
+  return [...new Set([...MANDATORY_FIELDS, ...fieldTokens(fields)])].join(',');
 }
 
 /** The `fields` parameter of an entry fetch (`fieldsParam`). */
 export function entryFieldsParam(fields: string | undefined): string {
-  return fieldsParam(fields, DEFAULT_ENTRY_FIELDS, MANDATORY_ENTRY_FIELDS);
+  return fieldsParam(fields, DEFAULT_ENTRY_FIELDS);
 }
 
 /** The `fields` parameter of a UniProtKB search (`fieldsParam`). */
 export function searchFieldsParam(fields: string | undefined): string {
-  return fieldsParam(fields, DEFAULT_SEARCH_FIELDS, MANDATORY_SEARCH_FIELDS);
+  return fieldsParam(fields, DEFAULT_SEARCH_FIELDS);
 }
 
 /**

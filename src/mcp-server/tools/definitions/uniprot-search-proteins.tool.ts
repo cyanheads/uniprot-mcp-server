@@ -3,8 +3,9 @@
  *   UniProtKB by free text (`text_search`) or a structured Lucene `query`,
  *   foregrounds the reviewed (Swiss-Prot) filter, optionally returns upstream
  *   facet counts, and walks results with an opaque forward cursor. Inactive
- *   accessions the query matches are split into inactive[], never built into
- *   hits. Chain the result accessions into uniprot_get_entry.
+ *   accessions the query names are split into inactive[], never built into
+ *   hits; an `active:false` branch keeps the reviewed and organism filters from
+ *   dropping them. Chain the result accessions into uniprot_get_entry.
  * @module mcp-server/tools/definitions/uniprot-search-proteins
  */
 
@@ -12,12 +13,16 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { activeServerConfig } from '@/config/server-config.js';
 import { clampPageSize, countInput, PAGE_SIZE_CAP } from '@/mcp-server/tools/input-limits.js';
+import { lengthLabel, moleculeLabel } from '@/mcp-server/tools/protein-format.js';
 import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import { ignoredFieldsNotice, searchFieldRequest } from '@/services/uniprot/return-fields.js';
 import type { SearchPage } from '@/services/uniprot/types.js';
 import {
+  ACCESSION_TOKEN_REGEX,
   describeInactiveInFull,
   groupClause,
+  MAX_OR_CONDITIONS,
+  orConditionCount,
   unbalancedParenthesis,
 } from '@/services/uniprot/types.js';
 import { getUniProtService, isCursorRejection } from '@/services/uniprot/uniprot-service.js';
@@ -55,6 +60,12 @@ const ProteinHitSchema = z
       })
       .describe('Source organism.'),
     length: z.number().describe('Canonical sequence length in residues.'),
+    sequenceFlags: z
+      .array(z.string().describe('One flag, as UniProt words it.'))
+      .optional()
+      .describe(
+        'UniProt\'s sequence flags: "Fragment" or "Fragments" (several non-adjacent pieces) when the sequence is incomplete, so length counts only the residues UniProt holds, not the whole protein; "Precursor" when the sequence is processed into a shorter mature form (signal, propeptide, transit peptide, or initiator methionine cleaved). Omitted when UniProt flags none.',
+      ),
     reviewed: z
       .boolean()
       .describe(
@@ -73,6 +84,12 @@ const ProteinHitSchema = z
       .optional()
       .describe(
         'Opening of the first FUNCTION annotation, evidence references stripped: whole sentences within 250 characters (at least the first; one over 400 is cut at a word and ends with …). The complete annotation with evidence is uniprot_get_entry function. Omitted when no function is annotated.',
+      ),
+    functionSnippetMolecule: z
+      .string()
+      .optional()
+      .describe(
+        'The isoform, chain, or peptide the functionSnippet annotation is about, as UniProt names it, e.g. "Glucagon" or "Isoform 2". Omitted when UniProt names none, so the snippet is about the protein the hit describes, and whenever functionSnippet is.',
       ),
   })
   .describe('A UniProtKB search hit.');
@@ -106,7 +123,7 @@ const InactiveHitSchema = z
 export const searchProteins = tool('uniprot_search_proteins', {
   title: 'uniprot-mcp-server: search proteins',
   description:
-    'Search UniProtKB and return curated protein records. Pass text_search for a plain-language query (the 80% case) or query for the full Lucene field syntax (gene:TP53 AND organism_id:9606 AND reviewed:true) — exactly one is required. Reviewed (Swiss-Prot) entries are manually curated; unreviewed (TrEMBL) are computationally predicted and ~30x more numerous, so reviewed defaults to true to avoid drowning in predictions — set it false to search both tiers together (for TrEMBL only, put reviewed:false in query). The organism_id and reviewed filters apply to the whole query. Request facets (e.g. reviewed, model_organism) for server-side count breakdowns. Results page forward with an opaque cursor; UniProtKB has no offset paging. An inactive accession the query matches (merged, demerged, or deleted) comes back in inactive[] with the accessions that replace it, never as a result. This is the discovery entry point — chain results[].accession into uniprot_get_entry for full records, or uniprot_get_sequence for FASTA.',
+    'Search UniProtKB and return curated protein records. Pass text_search for a plain-language query (the 80% case) or query for the full Lucene field syntax (gene:TP53 AND organism_id:9606 AND reviewed:true) — exactly one is required. Reviewed (Swiss-Prot) entries are manually curated; unreviewed (TrEMBL) are computationally predicted and ~30x more numerous, so reviewed defaults to true to avoid drowning in predictions — set it false to search both tiers together (for TrEMBL only, put reviewed:false in query). The organism_id and reviewed filters apply to the whole query. Request facets (e.g. reviewed, model_organism) for server-side count breakdowns. Results page forward with an opaque cursor; UniProtKB has no offset paging. An inactive accession the query names (merged, demerged, or deleted) comes back in inactive[] with the accessions that replace it, never as a result — the reviewed and organism_id filters do not drop it. This is the discovery entry point — chain results[].accession into uniprot_get_entry for full records, or uniprot_get_sequence for FASTA.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     text_search: z
@@ -125,7 +142,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .boolean()
       .default(true)
       .describe(
-        'Restrict to reviewed Swiss-Prot entries. Defaults to true (curated only). false applies no tier filter, returning reviewed and unreviewed TrEMBL entries together; for TrEMBL only, put reviewed:false in query. Ignored when query already contains a reviewed: clause; plain text never overrides this filter.',
+        'Restrict to reviewed Swiss-Prot entries. Defaults to true (curated only). false applies no tier filter, returning reviewed and unreviewed TrEMBL entries together; for TrEMBL only, put reviewed:false in query. Ignored when query already contains a reviewed: clause; plain text never overrides this filter. An inactive accession the query names carries no tier and still comes back in inactive[].',
       ),
     organism_id: z
       .number()
@@ -133,7 +150,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .positive()
       .optional()
       .describe(
-        'Restrict to an NCBI taxon and its descendants, including strains and subspecies, e.g. 9606 for human or 562 for E. coli. Applies taxonomy_id to the whole query; use an explicit organism_id: clause in query for an exact taxon. Resolve names with uniprot_get_taxonomy.',
+        'Restrict to an NCBI taxon and its descendants, including strains and subspecies, e.g. 9606 for human or 562 for E. coli. Applies taxonomy_id to the whole query, except that an inactive accession the query names carries no organism and still comes back in inactive[]; use an explicit organism_id: clause in query for an exact taxon. Resolve names with uniprot_get_taxonomy.',
       ),
     fields: z
       .string()
@@ -168,7 +185,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       .array(InactiveHitSchema)
       .optional()
       .describe(
-        'Matching accessions that are inactive in UniProtKB (merged, demerged, or deleted) — not proteins to read, but pointers to the accessions that replace them. Present only when the page held any.',
+        "Matching accessions that are inactive in UniProtKB (merged, demerged, or deleted) — not proteins to read, but pointers to the accessions that replace them. Present only when the page held any. Under the reviewed or organism_id filter these are the accessions query or text_search names, unless the query already spends more than 98 of UniProt's 100 OR conditions (each OR operand or space-separated term is one); with reviewed: false and no organism_id, every inactive accession the query matches comes back.",
       ),
     facets: z
       .array(
@@ -199,7 +216,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
     totalResults: z
       .number()
       .describe(
-        'Total matches for the query before pagination (from the upstream result count), inactive accessions included.',
+        'Total matches for the query before pagination (from the upstream result count), inactive accessions included — they fall in no facet bucket, so facet counts can sum below it.',
       ),
     effectiveQuery: z
       .string()
@@ -277,13 +294,25 @@ export const searchProteins = tool('uniprot_search_proteins', {
     const filters: string[] = [];
     if (input.organism_id) filters.push(`taxonomy_id:${input.organism_id}`);
     if (input.reviewed && !callerPinsTier) filters.push('reviewed:true');
-    // UniProtKB binds AND tighter than OR, so the caller's clause is parenthesized before
-    // any filter is ANDed on — unwrapped, a top-level OR takes the filters on its last
-    // branch only. The balance check above keeps a stray ")" from closing this group early.
-    // Escaped text always has paired backslashes; only raw Lucene needs the trailing-escape guard.
-    const effectiveQuery = filters.length
-      ? [luceneQuery ? groupClause(clause) : `(${clause})`, ...filters].join(' AND ')
-      : clause;
+    let effectiveQuery = clause;
+    if (filters.length) {
+      // UniProtKB binds AND tighter than OR, so the caller's clause is parenthesized before
+      // any filter is ANDed on — unwrapped, a top-level OR takes the filters on its last
+      // branch only. The balance check above keeps a stray ")" from closing this group early.
+      // Escaped text always has paired backslashes; only raw Lucene needs the trailing-escape guard.
+      const grouped = luceneQuery ? groupClause(clause) : `(${clause})`;
+      const filter = filters.join(' AND ');
+      // An inactive stub carries no tier and no organism, so either filter excludes it
+      // upstream; OR-ing active:false beside the filters admits the stubs a clause naming an
+      // accession matches. A clause naming none is sent as before, since a negation or a
+      // match-all would admit every stub in UniProtKB. The branch spends two OR conditions,
+      // so a clause already holding more than 98 goes without it.
+      const admitsNamedStubs =
+        ACCESSION_TOKEN_REGEX.test(clause) && orConditionCount(clause) + 2 <= MAX_OR_CONDITIONS;
+      effectiveQuery = admitsNamedStubs
+        ? `${grouped} AND ((${filter}) OR active:false)`
+        : `${grouped} AND ${filter}`;
+    }
     const cursor = queryCursor.decode(input.cursor, 'uniprot_search_proteins', effectiveQuery);
     // ctx.enrich.notice is last-wins, so every notice the call raises is collected here and sent once.
     const notices: string[] = [];
@@ -363,7 +392,7 @@ export const searchProteins = tool('uniprot_search_proteins', {
       const meta = [
         hit.reviewed ? 'Reviewed (Swiss-Prot)' : 'Unreviewed (TrEMBL)',
         `Score ${hit.annotationScore}/5`,
-        `${hit.length} aa`,
+        lengthLabel(hit.length, hit.sequenceFlags),
         hit.proteinExistence,
       ].join(' · ');
       lines.push(meta);
@@ -371,7 +400,11 @@ export const searchProteins = tool('uniprot_search_proteins', {
         `**Organism:** ${hit.organism.scientificName}${hit.organism.commonName ? ` (${hit.organism.commonName})` : ''} [taxon ${hit.organism.taxonId}]`,
       );
       if (hit.geneNames.length) lines.push(`**Genes:** ${hit.geneNames.join(', ')}`);
-      if (hit.functionSnippet) lines.push(`**Function:** ${hit.functionSnippet}`);
+      // A molecule comes only with a snippet; it leads the text, as on uniprot_get_entry function rows.
+      if (hit.functionSnippet)
+        lines.push(
+          `**Function:** ${moleculeLabel(hit.functionSnippetMolecule)}${hit.functionSnippet}`,
+        );
       lines.push('');
     }
     if (result.inactive?.length) {

@@ -25,12 +25,15 @@ import { getServerConfig } from '@/config/server-config.js';
 import { proteomeQuery } from '@/services/uniprot/proteome-query.js';
 import { entryFieldsParam, searchFieldsParam } from '@/services/uniprot/return-fields.js';
 import type {
+  Biophysicochemical,
   Cofactor,
   Comment,
   Disease,
   Entry,
   EvidencedText,
   Feature,
+  FeatureLocation,
+  FunctionText,
   GoTerm,
   IdMappingContinuation,
   IdMappingFromDb,
@@ -43,6 +46,8 @@ import type {
   Isoform,
   Keyword,
   Location,
+  MappingIdentityGap,
+  MappingReadFailure,
   Organism,
   ProteinHit,
   Proteome,
@@ -359,13 +364,14 @@ type RawComment = {
     name: string;
     ecNumber?: string;
     reactionCrossReferences?: { database: string; id: string }[];
+    evidences?: RawEvidence[];
   };
   cofactors?: {
     name: string;
     evidences?: RawEvidence[];
     cofactorCrossReference?: { database: string; id: string };
   }[];
-  subcellularLocations?: { location: RawText; topology?: RawText }[];
+  subcellularLocations?: { location: RawText; topology?: RawText; orientation?: RawText }[];
   /** `null` on a DISEASE comment that carries only a note. */
   disease?: {
     diseaseId?: string;
@@ -377,12 +383,42 @@ type RawComment = {
   events?: string[];
   isoforms?: {
     name?: RawValue;
+    synonyms?: RawValue[];
     isoformIds?: string[];
     isoformSequenceStatus?: string;
   }[];
+  // The parts of a BIOPHYSICOCHEMICAL PROPERTIES comment.
+  kineticParameters?: {
+    michaelisConstants?: {
+      constant: number;
+      unit: string;
+      substrate: string;
+      evidences?: RawEvidence[];
+    }[];
+    maximumVelocities?: {
+      velocity: number;
+      unit: string;
+      enzyme: string;
+      evidences?: RawEvidence[];
+    }[];
+    note?: { texts?: RawText[] };
+  };
+  phDependence?: { texts?: RawText[] };
+  temperatureDependence?: { texts?: RawText[] };
+  redoxPotential?: { texts?: RawText[] };
+  /** `approximate` is sent on every absorption, `false` on an exact maximum. */
+  absorption?: {
+    max?: number;
+    approximate?: boolean;
+    note?: { texts?: RawText[] };
+    evidences?: RawEvidence[];
+  };
 };
 
-type RawFeatureLocation = { start?: { value?: number }; end?: { value?: number } };
+/** One bound of a feature location; `value` is null when `modifier` is `UNKNOWN`. */
+type RawFeatureBound = { value?: number | null; modifier?: string };
+/** `sequence` names the isoform the positions are numbered on, absent on the canonical sequence. */
+type RawFeatureLocation = { start?: RawFeatureBound; end?: RawFeatureBound; sequence?: string };
 type RawFeature = {
   type: string;
   description?: string;
@@ -444,6 +480,8 @@ type RawEntry = RawInactiveFields & {
     recommendedName?: { fullName?: RawValue; ecNumbers?: RawValue[] };
     alternativeNames?: { fullName?: RawValue }[];
     submissionNames?: { fullName?: RawValue }[];
+    /** UniProt's sequence flags, comma-separated: "Fragment", "Fragments", "Precursor", e.g. "Fragment,Precursor". */
+    flag?: string;
   };
   genes?: {
     geneName?: RawValue;
@@ -618,52 +656,129 @@ export class UniProtService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Run an ID-mapping job and poll within a wall-clock budget. On `FINISHED`,
-   * fetch and return the mappings. If the budget elapses first, return a
-   * resumable ticket (the bare jobId — UniProt holds the job server-side).
+   * Run an ID-mapping job and poll it within `UNIPROT_ID_MAPPING_BUDGET_MS`. On
+   * `FINISHED`, fetch and return the first `size` mappings. If the budget elapses
+   * first, return a resumable ticket (the bare jobId — UniProt holds the job
+   * server-side). The whole call runs under `MAPPING_CALL_BUDGET_MS`.
    */
-  async mapIds(
+  mapIds(
     from: IdMappingFromDb,
     to: IdMappingToDb,
     ids: string[],
     taxId: number | undefined,
+    size: number,
     ctx: Context,
   ): Promise<IdMappingResult> {
-    const cfg = getServerConfig();
-    const jobId = await this.runMapping(from, to, ids, taxId, ctx);
-    const deadline = Date.now() + cfg.idMappingBudgetMs;
-
-    while (Date.now() < deadline) {
-      if (ctx.signal.aborted) break;
-      const status = await this.mappingStatus(jobId, ctx);
-      if (status === 'FINISHED') {
-        return { status: 'finished', ...(await this.mappingResults(jobId, ctx, undefined, to)) };
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    return { status: 'running', ticket: jobId };
+    return this.withinCallBudget(ctx, async (callCtx, resumeWith) => {
+      const jobId = await this.runMapping(from, to, ids, taxId, callCtx);
+      resumeWith({ ticket: jobId });
+      const poll = await this.pollMapping(jobId, true, callCtx);
+      if (poll !== 'finished') return stillRunning(jobId, poll);
+      return {
+        status: 'finished',
+        ...(await this.mappingResults(jobId, size, callCtx, undefined, to)),
+      };
+    });
   }
 
   /**
-   * Fetch results for a previously-submitted ID-mapping ticket (resume path). A
-   * caller-supplied ticket or continuation job id reaches the request path only
-   * after the tool has matched it against `JOB_ID_REGEX`.
+   * Poll a previously-submitted ID-mapping ticket within the same budget a
+   * submission gets, then fetch its first `size` mappings. A caller-supplied
+   * ticket or continuation job id reaches the request path only after the tool
+   * has matched it against `JOB_ID_REGEX`.
    */
-  async resumeMapping(ticket: string, ctx: Context): Promise<IdMappingResult> {
-    const status = await this.mappingStatus(ticket, ctx);
-    if (status !== 'FINISHED') return { status: 'running', ticket };
-    return { status: 'finished', ...(await this.mappingResults(ticket, ctx)) };
+  resumeMapping(ticket: string, size: number, ctx: Context): Promise<IdMappingResult> {
+    return this.withinCallBudget(ctx, async (callCtx, resumeWith) => {
+      resumeWith({ ticket });
+      const poll = await this.pollMapping(ticket, false, callCtx);
+      if (poll !== 'finished') return stillRunning(ticket, poll);
+      return { status: 'finished', ...(await this.mappingResults(ticket, size, callCtx)) };
+    });
   }
 
-  /** Fetch the next page of an already-completed ID-mapping job. */
-  async resumeMappingPage(
+  /**
+   * Fetch the next `size` mappings of an already-completed ID-mapping job. UniProt's
+   * results cursor is positional, so a continuation resumes at the next row at any size.
+   */
+  resumeMappingPage(
     continuation: IdMappingContinuation,
+    size: number,
     ctx: Context,
   ): Promise<IdMappingResult> {
-    return {
-      status: 'finished',
-      ...(await this.mappingResults(continuation.jobId, ctx, continuation.cursor)),
-    };
+    return this.withinCallBudget(ctx, async (callCtx, resumeWith) => {
+      resumeWith({ continuation });
+      return {
+        status: 'finished',
+        ...(await this.mappingResults(continuation.jobId, size, callCtx, continuation.cursor)),
+      };
+    });
+  }
+
+  /**
+   * Run one ID-mapping call under `MAPPING_CALL_BUDGET_MS`: every request it makes,
+   * and every retry and pause between them, shares the one deadline. `run` reports
+   * through `resumeWith` how a caller resumes the job once its id exists. A spent
+   * budget surfaces as a `Timeout` naming it — and, past that point, the job and the
+   * ticket or continuation to re-call with; caller cancellation propagates as it arrived.
+   */
+  private async withinCallBudget<T>(
+    ctx: Context,
+    run: (callCtx: Context, resumeWith: (resume: MappingResume) => void) => Promise<T>,
+  ): Promise<T> {
+    const budget = startDeadline(MAPPING_CALL_BUDGET_MS);
+    const callCtx = { ...ctx, signal: AbortSignal.any([ctx.signal, budget.signal]) };
+    let resume: MappingResume | undefined;
+    try {
+      return await run(callCtx, (point) => {
+        resume = point;
+      });
+    } catch (err) {
+      if (!deadlineElapsed(callCtx.signal)) throw err;
+      throw mappingBudgetSpent(resume, err);
+    } finally {
+      budget.clear();
+    }
+  }
+
+  /**
+   * Check a job's status until it is `FINISHED` or `UNIPROT_ID_MAPPING_BUDGET_MS`
+   * elapses (`running`), pausing `MAPPING_POLL_INTERVAL_MS` between checks. The first
+   * check always runs, and a check in flight when the budget elapses completes. The
+   * call budget ending the poll also returns `running`: the job is held server-side,
+   * so its ticket resumes it.
+   *
+   * Once the job is known to exist — `submitted` by this call, or any check answered —
+   * a check failing upstream (unavailable, rate-limited, timed out, an HTML page)
+   * after its retries ends the poll as `check_failed`, so the caller keeps the ticket.
+   * The first check of a caller's ticket has no such fallback: it propagates. Caller
+   * cancellation stops the poll with no further status request and propagates, as do
+   * a job that reports an error, an unknown job, and every other failure.
+   */
+  private async pollMapping(
+    jobId: string,
+    submitted: boolean,
+    ctx: Context,
+  ): Promise<'finished' | 'running' | 'check_failed'> {
+    const endsAt = Date.now() + getServerConfig().idMappingBudgetMs;
+    let exists = submitted;
+    try {
+      do {
+        if ((await this.mappingStatus(jobId, ctx)) === 'FINISHED') return 'finished';
+        exists = true;
+        await pause(MAPPING_POLL_INTERVAL_MS, ctx.signal);
+      } while (Date.now() < endsAt);
+      return 'running';
+    } catch (err) {
+      if (deadlineElapsed(ctx.signal)) return 'running';
+      const failure = ctx.signal.aborted ? undefined : unavailableRead(err);
+      if (exists && (failure === 'timeout' || failure === 'failed')) {
+        ctx.log.warning('ID-mapping status check failed upstream; reporting the job running', {
+          jobId,
+        });
+        return 'check_failed';
+      }
+      throw err;
+    }
   }
 
   private async runMapping(
@@ -741,8 +856,8 @@ export class UniProtService {
         );
         const text = await response.text();
         this.guardHtml(text);
-        const data = JSON.parse(text) as { jobStatus?: string; errors?: { message?: string }[] };
-        if (data.jobStatus === 'ERROR') throw mappingFailure(data);
+        const data = JSON.parse(text) as RawMappingStatus;
+        if (data.jobStatus === 'ERROR') throw mappingFailure(data, jobId);
         return data.jobStatus ?? 'RUNNING';
       } catch (err) {
         if (ctx.signal.aborted) throw err;
@@ -750,13 +865,13 @@ export class UniProtService {
           const raw = err.data;
           const body = raw.body ?? raw.responseBody;
           if (typeof body === 'string') {
-            let parsed: { jobStatus?: string; errors?: { message?: string }[] } | undefined;
+            let parsed: RawMappingStatus | undefined;
             try {
               parsed = JSON.parse(body);
             } catch {
               /* Non-JSON failures retain HTTP classification. */
             }
-            if (parsed?.jobStatus === 'ERROR') throw mappingFailure(parsed, err);
+            if (parsed?.jobStatus === 'ERROR') throw mappingFailure(parsed, jobId, err);
           }
         }
         const status =
@@ -769,28 +884,35 @@ export class UniProtService {
     });
   }
 
+  /**
+   * One completed results page of `size` rows. The job-details read (when the target
+   * database is unknown) decides which results read runs, and the identity-enriched
+   * read replaces the generic one, so both get the per-request `UNIPROT_TIMEOUT_MS`;
+   * either one unavailable leaves generic rows, with `identityUnavailable` naming why.
+   * The inactive-target re-read is an extra read, best-effort under `OPTIONAL_READ_MS`.
+   * Every read stays inside the call budget `ctx` carries.
+   */
   private async mappingResults(
     jobId: string,
+    size: number,
     ctx: Context,
     cursor?: string,
     target?: string,
   ): Promise<IdMappingPage> {
-    // Old tickets carry no target database. Metadata is optional: never strand a usable job.
-    const optionalCtx = {
-      ...ctx,
-      signal: AbortSignal.any([ctx.signal, AbortSignal.timeout(2_000)]),
-    };
+    let identityUnavailable: MappingIdentityGap | undefined;
+    // Tickets and continuations carry no target database. Metadata is optional: never strand a usable job.
     if (target === undefined) {
       try {
-        const metadata = await this.optionalMappingJson<{ to?: string }>(
-          `${this.baseUrl}/idmapping/details/${jobId}`,
-          'uniprot.mappingDetails',
-          optionalCtx,
-        );
-        target = metadata.data.to;
+        target = (
+          await this.optionalMappingJson<{ to?: string }>(
+            `${this.baseUrl}/idmapping/details/${jobId}`,
+            'uniprot.mappingDetails',
+            ctx,
+          )
+        ).data.to;
+        if (target === undefined) identityUnavailable = 'no_target';
       } catch (err) {
-        if (ctx.signal.aborted || !mappingEnrichmentUnavailable(err, optionalCtx.signal.aborted))
-          throw err;
+        identityUnavailable = `details_${degradedRead(err, ctx.signal)}`;
       }
     }
     const enriched = target === 'UniProtKB' || target === 'UniProtKB-Swiss-Prot';
@@ -798,28 +920,26 @@ export class UniProtService {
       `${this.baseUrl}/idmapping/${enriched ? 'uniprotkb/' : ''}results/${jobId}`,
     );
     url.searchParams.set('format', 'json');
-    url.searchParams.set('size', '500');
-    if (enriched) url.searchParams.set('fields', 'accession,id,reviewed,organism_id,gene_primary');
+    url.searchParams.set('size', String(size));
+    if (enriched)
+      url.searchParams.set(
+        'fields',
+        'accession,id,reviewed,organism_id,organism_name,gene_primary',
+      );
     if (cursor) url.searchParams.set('cursor', cursor);
 
     let page: { data: RawMappingResults; response: Response };
-    let identityUnavailable = target === undefined;
     try {
       page = enriched
         ? await this.optionalMappingJson<RawMappingResults>(
             url.toString(),
             'uniprot.mappingResults',
-            optionalCtx,
+            ctx,
           )
         : await this.getJson<RawMappingResults>(url.toString(), 'uniprot.mappingResults', ctx);
     } catch (err) {
-      if (
-        !enriched ||
-        ctx.signal.aborted ||
-        !mappingEnrichmentUnavailable(err, optionalCtx.signal.aborted)
-      )
-        throw err;
-      identityUnavailable = true;
+      if (!enriched) throw err;
+      identityUnavailable = `identity_${degradedRead(err, ctx.signal)}`;
       url.pathname = new URL(`${this.baseUrl}/idmapping/results/${jobId}`).pathname;
       url.searchParams.delete('fields');
       page = await this.getJson<RawMappingResults>(url.toString(), 'uniprot.mappingResults', ctx);
@@ -836,19 +956,15 @@ export class UniProtService {
     // results endpoint says which — so only such a job pays one more read per page.
     let inactiveUnchecked: number | undefined;
     if (data.obsoleteCount && results.length && (!enriched || identityUnavailable)) {
-      try {
-        const inactive = await this.inactiveMappingTargets(jobId, cursor, results, optionalCtx);
+      const inactive = await this.optionalRead(ctx, (readCtx) =>
+        this.inactiveMappingTargets(jobId, cursor, size, results, readCtx),
+      );
+      if (inactive) {
         results = results.map((r) => {
           const reason = inactive.get(mappingKey(r.from, r.to));
           return reason ? { ...r, inactive: reason } : r;
         });
-      } catch (err) {
-        if (
-          ctx.signal.aborted ||
-          (!mappingEnrichmentUnavailable(err, optionalCtx.signal.aborted) &&
-            !(err instanceof MappingPageMismatch))
-        )
-          throw err;
+      } else {
         ctx.log.warning('Inactive ID-mapping target lookup failed', { jobId });
         inactiveUnchecked = data.obsoleteCount;
       }
@@ -895,23 +1011,50 @@ export class UniProtService {
   }
 
   /**
+   * Run one best-effort read (the inactive-target re-read) under its own
+   * `OPTIONAL_READ_MS` deadline, inside the call budget `ctx` carries. Resolves
+   * `undefined` when the read is unavailable, returns a different page, or either
+   * deadline cuts it; caller cancellation and any other failure (a malformed body)
+   * propagate.
+   */
+  private async optionalRead<T>(
+    ctx: Context,
+    read: (readCtx: Context) => Promise<T>,
+  ): Promise<T | undefined> {
+    const limit = startDeadline(OPTIONAL_READ_MS);
+    const readCtx = { ...ctx, signal: AbortSignal.any([ctx.signal, limit.signal]) };
+    try {
+      return await read(readCtx);
+    } catch (err) {
+      const cut = deadlineElapsed(readCtx.signal);
+      if (readCtx.signal.aborted && !cut) throw err;
+      if (!mappingEnrichmentUnavailable(err, cut) && !(err instanceof MappingPageMismatch))
+        throw err;
+      return;
+    } finally {
+      limit.clear();
+    }
+  }
+
+  /**
    * The inactive targets on one ID-mapping results page, keyed by source ID and
    * target accession. Read from `/idmapping/uniprotkb/results/{jobId}`, the results
    * endpoint whose rows carry the target entry and so its inactive stub; the
-   * generic endpoint's cursor addresses the same page there. Throws when the
-   * re-read page lacks a row of `page`, so a drifted page is disclosed as
-   * unchecked rather than left silently unmarked.
+   * generic endpoint's cursor addresses the same page there at the same `size`.
+   * Throws when the re-read page lacks a row of `page`, so a drifted page is
+   * disclosed as unchecked rather than left silently unmarked.
    */
   private async inactiveMappingTargets(
     jobId: string,
     cursor: string | undefined,
+    size: number,
     page: { from: string; to: string }[],
     ctx: Context,
   ): Promise<Map<string, InactiveReason>> {
     const url = new URL(`${this.baseUrl}/idmapping/uniprotkb/results/${jobId}`);
     url.searchParams.set('format', 'json');
     url.searchParams.set('fields', 'accession');
-    url.searchParams.set('size', '500');
+    url.searchParams.set('size', String(size));
     if (cursor) url.searchParams.set('cursor', cursor);
 
     const { data } = await this.getJson<RawMappingResults>(
@@ -1009,8 +1152,13 @@ export class UniProtService {
       raw = candidates[0];
     }
     if (!raw) {
-      const label = idOrTaxon.upid ?? `taxon ${idOrTaxon.taxonId}`;
-      throw notFound(`No reference proteome found for ${label}.`, { ...idOrTaxon });
+      // A UPID can name a non-reference or excluded proteome; only the taxon path looks for a reference one.
+      throw notFound(
+        idOrTaxon.upid
+          ? `No proteome found for UPID ${idOrTaxon.upid}.`
+          : `No reference proteome found for taxon ${idOrTaxon.taxonId}.`,
+        { ...idOrTaxon },
+      );
     }
     return normalizeProteome(raw);
   }
@@ -1333,15 +1481,34 @@ export class UniProtService {
     );
   }
 
-  private firstFunctionSnippet(raw: RawEntry): string | undefined {
+  /** The sequence flags, split; omitted when UniProt flags none. A fragment's `length` is the fragment's. */
+  private sequenceFlags(raw: RawEntry): Pick<ProteinHit, 'sequenceFlags'> {
+    const flags = (raw.proteinDescription?.flag ?? '')
+      .split(',')
+      .map((flag) => flag.trim())
+      .filter(Boolean);
+    return flags.length ? { sequenceFlags: flags } : {};
+  }
+
+  /**
+   * The bounded opening of the first FUNCTION comment's first text, with the molecule
+   * that comment is about. The molecule rides only with a snippet.
+   */
+  private firstFunctionSnippet(
+    raw: RawEntry,
+  ): Pick<ProteinHit, 'functionSnippet' | 'functionSnippetMolecule'> {
     const fn = raw.comments?.find((c) => c.commentType === 'FUNCTION');
     const text = fn?.texts?.[0]?.value;
-    return text ? boundedSnippet(stripEvidence(text)) : undefined;
+    const snippet = text ? boundedSnippet(stripEvidence(text)) : undefined;
+    if (!snippet) return {};
+    return {
+      functionSnippet: snippet,
+      ...(fn?.molecule ? { functionSnippetMolecule: fn.molecule } : {}),
+    };
   }
 
   private normalizeHit(raw: RawEntry): ProteinHit {
     const proteinName = this.proteinName(raw);
-    const fnSnippet = this.firstFunctionSnippet(raw);
     return {
       accession: raw.primaryAccession,
       entryName: raw.uniProtkbId,
@@ -1349,10 +1516,11 @@ export class UniProtService {
       geneNames: this.geneNames(raw),
       organism: this.normalizeOrganism(raw.organism),
       length: raw.sequence?.length ?? 0,
+      ...this.sequenceFlags(raw),
       reviewed: raw.entryType === 'UniProtKB reviewed (Swiss-Prot)',
       annotationScore: raw.annotationScore ?? 0,
       proteinExistence: raw.proteinExistence ?? 'unknown',
-      ...(fnSnippet ? { functionSnippet: fnSnippet } : {}),
+      ...this.firstFunctionSnippet(raw),
     };
   }
 
@@ -1361,13 +1529,16 @@ export class UniProtService {
     const features = raw.features ?? [];
     const proteinName = this.proteinName(raw);
 
+    // Rows of these four sections are flat parts of a comment: each carries its comment's
+    // molecule, so a windowed row still says which isoform or chain it describes.
     const fn = comments
       .filter((c) => c.commentType === 'FUNCTION')
-      .flatMap((c) => c.texts ?? [])
-      .map<EvidencedText>((t) => {
-        const evidence = collectEvidence(t.evidences);
-        return { value: t.value, ...(evidence ? { evidence } : {}) };
-      });
+      .flatMap((c) =>
+        (c.texts ?? []).map<FunctionText>((t) => ({
+          value: t.value,
+          ...rowQualifiers(c, t.evidences),
+        })),
+      );
 
     const catalytic = comments
       .filter((c) => c.commentType === 'CATALYTIC ACTIVITY')
@@ -1382,27 +1553,38 @@ export class UniProtService {
             name: reaction.name,
             ...(reaction.ecNumber ? { ecNumber: reaction.ecNumber } : {}),
             ...(rhea ? { rheaId: rhea.id } : {}),
+            ...rowQualifiers(c, reaction.evidences),
           },
         ];
       });
 
     const cofactors = comments
       .filter((c) => c.commentType === 'COFACTOR')
-      .flatMap((c) => c.cofactors ?? [])
-      .map<Cofactor>((cf) => ({
-        name: cf.name,
-        ...(cf.cofactorCrossReference?.database === 'ChEBI'
-          ? { chebiId: cf.cofactorCrossReference.id }
-          : {}),
-      }));
+      .flatMap((c) =>
+        (c.cofactors ?? []).map<Cofactor>((cf) => ({
+          name: cf.name,
+          ...(cf.cofactorCrossReference?.database === 'ChEBI'
+            ? { chebiId: cf.cofactorCrossReference.id }
+            : {}),
+          ...rowQualifiers(c, cf.evidences),
+        })),
+      );
 
+    const biophysicochemical = comments
+      .filter((c) => c.commentType === 'BIOPHYSICOCHEMICAL PROPERTIES')
+      .map(normalizeBiophysicochemical);
+
+    // A row's evidence is its location's own; the topology's and orientation's are not kept.
     const subcellularLocation = comments
       .filter((c) => c.commentType === 'SUBCELLULAR LOCATION')
-      .flatMap((c) => c.subcellularLocations ?? [])
-      .map<Location>((l) => ({
-        location: l.location.value,
-        ...(l.topology?.value ? { topology: l.topology.value } : {}),
-      }));
+      .flatMap((c) =>
+        (c.subcellularLocations ?? []).map<Location>((l) => ({
+          location: l.location.value,
+          ...(l.topology?.value ? { topology: l.topology.value } : {}),
+          ...(l.orientation?.value ? { orientation: l.orientation.value } : {}),
+          ...rowQualifiers(c, l.location.evidences),
+        })),
+      );
 
     const disease = comments
       .filter((c) => c.commentType === 'DISEASE')
@@ -1424,26 +1606,21 @@ export class UniProtService {
         ];
       });
 
-    // A DISEASE comment that names no disease carries only a note: it is free text, filed
-    // under comments so disease[].name stays a real disease name.
+    // A note covers its whole comment, so it is filed here once, one row per note text, rather
+    // than copied onto each of the comment's rows in its own section. A DISEASE comment that names
+    // no disease carries only a note, filed here so disease[].name stays a real disease name; a
+    // named disease keeps its note as disease[].note.
     const freeText = comments.flatMap<Comment>((c) => {
-      const texts =
-        c.commentType === 'DISEASE'
-          ? c.disease
-            ? []
-            : (c.note?.texts ?? [])
-          : FREE_TEXT_COMMENT_TYPES.has(c.commentType)
-            ? (c.texts ?? [])
-            : [];
-      return texts.map((t) => {
-        const evidence = collectEvidence(t.evidences);
-        return {
-          type: c.commentType,
-          value: t.value,
-          ...(evidence ? { evidence } : {}),
-          ...(c.molecule ? { molecule: c.molecule } : {}),
-        };
-      });
+      const texts = FREE_TEXT_COMMENT_TYPES.has(c.commentType)
+        ? (c.texts ?? [])
+        : NOTE_COMMENT_TYPES.has(c.commentType) || (c.commentType === 'DISEASE' && !c.disease)
+          ? (c.note?.texts ?? [])
+          : [];
+      return texts.map((t) => ({
+        type: c.commentType,
+        value: t.value,
+        ...rowQualifiers(c, t.evidences),
+      }));
     });
 
     const interactions = comments
@@ -1484,11 +1661,15 @@ export class UniProtService {
     const isoforms = comments
       .filter((c) => c.commentType === 'ALTERNATIVE PRODUCTS')
       .flatMap((c) => c.isoforms ?? [])
-      .map<Isoform>((iso) => ({
-        isoformId: iso.isoformIds?.[0] ?? 'unknown',
-        ...(iso.name?.value ? { name: iso.name.value } : {}),
-        ...(iso.isoformSequenceStatus ? { sequenceStatus: iso.isoformSequenceStatus } : {}),
-      }));
+      .map<Isoform>((iso) => {
+        const synonyms = (iso.synonyms ?? []).map((s) => s.value);
+        return {
+          isoformId: iso.isoformIds?.[0] ?? 'unknown',
+          ...(iso.name?.value ? { name: iso.name.value } : {}),
+          ...(synonyms.length ? { synonyms } : {}),
+          ...(iso.isoformSequenceStatus ? { sequenceStatus: iso.isoformSequenceStatus } : {}),
+        };
+      });
 
     const xrefList = raw.uniProtKBCrossReferences ?? [];
     const goTerms = xrefList
@@ -1539,6 +1720,7 @@ export class UniProtService {
       genes: this.geneNames(raw),
       organism: { ...this.normalizeOrganism(raw.organism), ...(mnemonic ? { mnemonic } : {}) },
       length: raw.sequence?.length ?? 0,
+      ...this.sequenceFlags(raw),
       reviewed: raw.entryType === 'UniProtKB reviewed (Swiss-Prot)',
       annotationScore: raw.annotationScore ?? 0,
       proteinExistence: raw.proteinExistence ?? 'unknown',
@@ -1546,6 +1728,7 @@ export class UniProtService {
       ...(fn.length ? { function: fn } : {}),
       ...(catalytic.length ? { catalyticActivity: catalytic } : {}),
       ...(cofactors.length ? { cofactors } : {}),
+      ...(biophysicochemical.length ? { biophysicochemical } : {}),
       ...(sites.length ? { sites } : {}),
       ...(subcellularLocation.length ? { subcellularLocation } : {}),
       ...(topology.length ? { topology } : {}),
@@ -1578,6 +1761,14 @@ type RawProteome = {
   id: string;
   proteomeType: string;
   proteinCount?: number;
+  geneCount?: number;
+  proteomeStatistics?: {
+    reviewedProteinCount: number;
+    unreviewedProteinCount: number;
+    isoformProteinCount: number;
+  };
+  /** Present on excluded proteomes only. */
+  exclusionReasons?: string[];
   taxonomy?: { scientificName: string; commonName?: string; taxonId: number; mnemonic?: string };
   genomeAssembly?: { assemblyId?: string };
   proteomeCompletenessReport?: {
@@ -1591,6 +1782,8 @@ type RawProteome = {
       lineageDb?: string;
       score?: number;
     };
+    /** Only `status` carries signal: UniProt sends 0 for its numeric members. */
+    cpdReport?: { status?: string };
   };
 };
 
@@ -1612,6 +1805,12 @@ type RawMappingResults = {
   failedIds?: string[];
 };
 
+/** `/idmapping/status/{jobId}`: `errors` accompanies a terminal `ERROR`. */
+type RawMappingStatus = {
+  jobStatus?: string;
+  errors?: { code?: number; message?: string }[];
+};
+
 /** The target accession of an ID-mapping row: the generic endpoint names it, the uniprotkb one embeds the entry. */
 function targetAccession(to: string | RawInactiveFields): string {
   return typeof to === 'string' ? to : to.primaryAccession;
@@ -1625,6 +1824,96 @@ function mappingKey(from: string, to: string): string {
 /** A different optional page is unavailable enrichment, not a usable identity match. */
 class MappingPageMismatch extends Error {}
 
+/**
+ * The one deadline an ID-mapping call runs under: submission, status polls, the
+ * job-details read, the results read and its generic fallback, the inactive-target
+ * re-read, and every retry and backoff between them. It sits 10 s under the 60 s
+ * request timeout MCP SDK clients apply by default, so a slow or hung upstream ends
+ * in this server's answer rather than a client-side timeout.
+ */
+const MAPPING_CALL_BUDGET_MS = 50_000;
+/** The pause between two ID-mapping status checks. */
+const MAPPING_POLL_INTERVAL_MS = 500;
+/** How long the best-effort inactive-target re-read may take. */
+const OPTIONAL_READ_MS = 2_000;
+
+/**
+ * The abort reason of this service's own deadlines. Named `TimeoutError`, so
+ * `fetchWithTimeout` reports a request it cuts as a timeout; its class tells a spent
+ * budget apart from a caller's cancellation.
+ */
+class DeadlineElapsed extends Error {
+  override readonly name = 'TimeoutError';
+}
+
+/** A signal that aborts `ms` from now with a `DeadlineElapsed` reason, and the function that disarms it. */
+function startDeadline(ms: number): { signal: AbortSignal; clear: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new DeadlineElapsed(`The ${ms} ms deadline elapsed.`)),
+    ms,
+  );
+  return { signal: controller.signal, clear: () => clearTimeout(timer) };
+}
+
+/** Whether `signal` was aborted by one of this service's deadlines, not by the caller. */
+function deadlineElapsed(signal: AbortSignal): boolean {
+  return signal.aborted && signal.reason instanceof DeadlineElapsed;
+}
+
+/** Resolve after `ms`, or reject with the signal's reason the moment it aborts. */
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal.throwIfAborted();
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason);
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * How an upstream mapping read was unavailable: it timed out, failed upstream
+ * (unavailable, rate-limited, an HTML page), or was refused (a 4xx). `undefined`
+ * for any other failure — a malformed body, a caller's cancellation — which is
+ * never read as unavailability.
+ */
+function unavailableRead(err: unknown): MappingReadFailure | undefined {
+  if (!(err instanceof McpError)) return;
+  switch (err.code) {
+    case JsonRpcErrorCode.Timeout:
+      return 'timeout';
+    case JsonRpcErrorCode.ServiceUnavailable:
+    case JsonRpcErrorCode.RateLimited:
+      return 'failed';
+    case JsonRpcErrorCode.NotFound:
+    case JsonRpcErrorCode.Forbidden:
+    case JsonRpcErrorCode.Unauthorized:
+    case JsonRpcErrorCode.ValidationError:
+    case JsonRpcErrorCode.InvalidParams:
+    case JsonRpcErrorCode.InvalidRequest:
+      return 'refused';
+    default:
+      return;
+  }
+}
+
+/**
+ * How an optional read that decides a page's identity was unavailable. Caller
+ * cancellation, a spent call budget, and any failure that is not unavailability
+ * (a malformed body) are rethrown.
+ */
+function degradedRead(err: unknown, signal: AbortSignal): MappingReadFailure {
+  const failure = signal.aborted ? undefined : unavailableRead(err);
+  if (!failure) throw err;
+  return failure;
+}
+
 /** Optional upstream reads degrade only for operational or endpoint availability failures. */
 function mappingEnrichmentUnavailable(err: unknown, deadlineExpired: boolean): boolean {
   if (
@@ -1634,20 +1923,50 @@ function mappingEnrichmentUnavailable(err: unknown, deadlineExpired: boolean): b
   )
     return true;
   return (
-    err instanceof McpError &&
-    ([
-      JsonRpcErrorCode.ServiceUnavailable,
-      JsonRpcErrorCode.Timeout,
-      JsonRpcErrorCode.NotFound,
-      JsonRpcErrorCode.Forbidden,
-      JsonRpcErrorCode.Unauthorized,
-      JsonRpcErrorCode.ValidationError,
-      JsonRpcErrorCode.RateLimited,
-      JsonRpcErrorCode.InvalidParams,
-      JsonRpcErrorCode.InvalidRequest,
-    ].includes(err.code) ||
-      (deadlineExpired && err.code === JsonRpcErrorCode.RequestCancelled))
+    unavailableRead(err) !== undefined ||
+    (deadlineExpired && err instanceof McpError && err.code === JsonRpcErrorCode.RequestCancelled)
   );
+}
+
+/** The arguments that resume a mapping job: its ticket, or a completed-page continuation. */
+type MappingResume = { ticket: string } | { continuation: IdMappingContinuation };
+
+/**
+ * The `Timeout` for a spent call budget. Before a job id exists there is nothing to
+ * resume, so the call is retried; after, the error names the job and carries the
+ * arguments that resume it (in `data` and the recovery hint), so a retry never
+ * re-submits a job UniProt already holds.
+ */
+function mappingBudgetSpent(resume: MappingResume | undefined, cause: unknown): McpError {
+  const budget = `this call's ${MAPPING_CALL_BUDGET_MS / 1_000}-second budget`;
+  if (!resume) {
+    return new McpError(
+      JsonRpcErrorCode.Timeout,
+      `UniProt ID mapping did not finish within ${budget}. Retry the call.`,
+      undefined,
+      { cause },
+    );
+  }
+  const args = JSON.stringify(resume);
+  const [jobId, reread] =
+    'ticket' in resume
+      ? [resume.ticket, 'to read its results without re-submitting the job']
+      : [resume.continuation.jobId, 'to read this page again'];
+  return new McpError(
+    JsonRpcErrorCode.Timeout,
+    `UniProt ID-mapping job ${jobId} is held server-side, but ${budget} ran out reading its results.`,
+    { ...resume, recovery: { hint: `Re-call with ${args} ${reread}.` } },
+    { cause, literals: [args] },
+  );
+}
+
+/** The running result of a poll that did not see `FINISHED`. */
+function stillRunning(ticket: string, poll: 'running' | 'check_failed'): IdMappingResult {
+  return {
+    status: 'running',
+    ticket,
+    ...(poll === 'check_failed' ? { statusCheckFailed: true } : {}),
+  };
 }
 
 /** Identity fields are sparse and inactive stubs retain their recovery pointers. */
@@ -1676,12 +1995,23 @@ function mappingIdentity(
   };
 }
 
-/** A terminal job failure is actionable input feedback, never an outage to retry. */
-function mappingFailure(data: { errors?: { message?: string }[] }, cause?: unknown): McpError {
-  const messages = (data.errors ?? [])
-    .flatMap((error) => (typeof error.message === 'string' ? [boundMessage(error.message)] : []))
-    .filter((message): message is string => Boolean(message))
-    .slice(0, MAX_RELAYED_MESSAGES);
+/** Markup in a relayed job-failure message: UniProt passes a backend's HTML error page through as one. */
+const HTML_MARKUP = /<(?:!doctype|\/?(?:html|head|body|title|meta)\b)/i;
+
+/**
+ * A terminal job failure is actionable input feedback, never an outage to retry.
+ * A message that would relay HTML markup — UniProt failing internally behind a
+ * proxy — becomes a fixed sentence naming the job and UniProt's error code.
+ */
+function mappingFailure(data: RawMappingStatus, jobId: string, cause?: unknown): McpError {
+  const relayed = (data.errors ?? []).flatMap((error) => {
+    const message = typeof error.message === 'string' ? boundMessage(error.message) : undefined;
+    if (!message) return [];
+    if (!HTML_MARKUP.test(message)) return [message];
+    const code = typeof error.code === 'number' ? ` (error code ${error.code})` : '';
+    return [`the ID-mapping service failed internally on job ${jobId}${code}`];
+  });
+  const messages = [...new Set(relayed)].slice(0, MAX_RELAYED_MESSAGES);
   const limit = messages.some((message) => message.includes('number of mapped IDs'));
   return new McpError(
     JsonRpcErrorCode.ValidationError,
@@ -1714,14 +2044,29 @@ function normalizeFacet(raw: RawFacet): SearchFacet {
   };
 }
 
+/**
+ * The one location reader for every feature-built section (`normalizeFeature`,
+ * and so `normalizeSite`, and `normalizeVariant`). Keeps each bound's position
+ * when UniProt gives one, its modifier only when it is not `EXACT`, and the
+ * isoform the positions are numbered on; field meanings are on `FeatureLocation`.
+ * An exact canonical location comes back as `{ start, end }` alone.
+ */
+function normalizeLocation(raw: RawFeatureLocation | undefined): FeatureLocation {
+  const { start, end, sequence } = raw ?? {};
+  return {
+    ...(start?.value != null ? { start: start.value } : {}),
+    ...(end?.value != null ? { end: end.value } : {}),
+    ...(start?.modifier && start.modifier !== 'EXACT' ? { startModifier: start.modifier } : {}),
+    ...(end?.modifier && end.modifier !== 'EXACT' ? { endModifier: end.modifier } : {}),
+    ...(sequence ? { isoform: sequence } : {}),
+  };
+}
+
 function normalizeFeature(raw: RawFeature): Feature {
   return {
     type: raw.type,
     ...(raw.description ? { description: raw.description } : {}),
-    location: {
-      ...(raw.location?.start?.value != null ? { start: raw.location.start.value } : {}),
-      ...(raw.location?.end?.value != null ? { end: raw.location.end.value } : {}),
-    },
+    location: normalizeLocation(raw.location),
     ...(raw.featureId ? { featureId: raw.featureId } : {}),
   };
 }
@@ -1781,10 +2126,88 @@ const FREE_TEXT_COMMENT_TYPES: ReadonlySet<string> = new Set([
   'TOXIC DOSE',
 ]);
 
+/**
+ * Comment types whose structured rows fill their own section (subcellularLocation, cofactors,
+ * isoforms) and whose `note`, when present, is rendered one row per text under `comments`.
+ */
+const NOTE_COMMENT_TYPES: ReadonlySet<string> = new Set([
+  'ALTERNATIVE PRODUCTS',
+  'COFACTOR',
+  'SUBCELLULAR LOCATION',
+]);
+
 /** A comment's note texts joined, or undefined when it has none. */
 function noteText(comment: RawComment): string | undefined {
   const text = (comment.note?.texts ?? []).map((t) => t.value).join(' ');
   return text || undefined;
+}
+
+/** `{ evidence }` from an evidences[] array, or nothing when it yields none. */
+function evidenceOf(evidences?: RawEvidence[]): { evidence?: string[] } {
+  const evidence = collectEvidence(evidences);
+  return evidence ? { evidence } : {};
+}
+
+/**
+ * A row's own evidence and the molecule (isoform or chain) its comment is about, each
+ * omitted when UniProt sends none.
+ */
+function rowQualifiers(
+  comment: RawComment,
+  evidences?: RawEvidence[],
+): Pick<Comment, 'evidence' | 'molecule'> {
+  return {
+    ...evidenceOf(evidences),
+    ...(comment.molecule ? { molecule: comment.molecule } : {}),
+  };
+}
+
+/**
+ * One BIOPHYSICOCHEMICAL PROPERTIES comment as one object: its molecule on the object (UniProt
+ * writes one such comment per molecule), each part omitted when UniProt sends none, and every
+ * KM row, Vmax row, text, and absorption with its own evidence.
+ */
+function normalizeBiophysicochemical(comment: RawComment): Biophysicochemical {
+  const texts = (part?: { texts?: RawText[] }): EvidencedText[] =>
+    (part?.texts ?? []).map((t) => ({ value: t.value, ...evidenceOf(t.evidences) }));
+
+  const kinetics = comment.kineticParameters;
+  const michaelisConstants = (kinetics?.michaelisConstants ?? []).map((k) => ({
+    constant: k.constant,
+    unit: k.unit,
+    substrate: k.substrate,
+    ...evidenceOf(k.evidences),
+  }));
+  const maximumVelocities = (kinetics?.maximumVelocities ?? []).map((v) => ({
+    velocity: v.velocity,
+    unit: v.unit,
+    enzyme: v.enzyme,
+    ...evidenceOf(v.evidences),
+  }));
+  const kineticsNote = texts(kinetics?.note);
+  const phDependence = texts(comment.phDependence);
+  const temperatureDependence = texts(comment.temperatureDependence);
+  const redoxPotential = texts(comment.redoxPotential);
+  const max = comment.absorption?.max;
+  const absorption = {
+    ...(max === undefined ? {} : { maxNm: max }),
+    // UniProt sends approximate on every absorption; only a maximum can be approximate.
+    ...(max !== undefined && comment.absorption?.approximate ? { approximate: true as const } : {}),
+    ...evidenceOf(comment.absorption?.evidences),
+  };
+  // Lifted beside absorption, as kineticsNote is beside the KM and Vmax rows.
+  const absorptionNote = texts(comment.absorption?.note);
+  return {
+    ...(comment.molecule ? { molecule: comment.molecule } : {}),
+    ...(michaelisConstants.length ? { michaelisConstants } : {}),
+    ...(maximumVelocities.length ? { maximumVelocities } : {}),
+    ...(kineticsNote.length ? { kineticsNote } : {}),
+    ...(phDependence.length ? { phDependence } : {}),
+    ...(temperatureDependence.length ? { temperatureDependence } : {}),
+    ...(redoxPotential.length ? { redoxPotential } : {}),
+    ...(Object.keys(absorption).length ? { absorption } : {}),
+    ...(absorptionNote.length ? { absorptionNote } : {}),
+  };
 }
 
 /** `ChEBI:CHEBI:29108` → `CHEBI:29108`; undefined for any other namespace or no id. */
@@ -1821,10 +2244,7 @@ function normalizeVariant(raw: RawFeature): Variant {
   const variation = raw.alternativeSequence?.alternativeSequences?.join(',');
   return {
     ...(raw.description ? { description: raw.description } : {}),
-    location: {
-      ...(raw.location?.start?.value != null ? { start: raw.location.start.value } : {}),
-      ...(raw.location?.end?.value != null ? { end: raw.location.end.value } : {}),
-    },
+    location: normalizeLocation(raw.location),
     ...(original ? { original } : {}),
     ...(variation ? { variation } : {}),
     ...(raw.featureId ? { featureId: raw.featureId } : {}),
@@ -1833,9 +2253,17 @@ function normalizeVariant(raw: RawFeature): Variant {
 
 function normalizeProteome(raw: RawProteome): Proteome {
   const busco = raw.proteomeCompletenessReport?.buscoReport;
+  const cpdStatus = raw.proteomeCompletenessReport?.cpdReport?.status;
+  // UniProt computes the gene count and statistics for reference proteomes only and sends 0
+  // for each elsewhere, beside a non-zero proteinCount. Reviewed and unreviewed partition
+  // proteinCount, so both 0 marks the placeholder; a single 0 (E. coli's unreviewed) is real.
+  const stats = raw.proteomeStatistics;
+  const statsComputed =
+    stats && (stats.reviewedProteinCount > 0 || stats.unreviewedProteinCount > 0);
   return {
     upid: raw.id,
     proteomeType: raw.proteomeType,
+    ...(raw.exclusionReasons?.length ? { exclusionReasons: raw.exclusionReasons } : {}),
     organism: {
       scientificName: raw.taxonomy?.scientificName ?? 'unknown',
       ...(raw.taxonomy?.commonName ? { commonName: raw.taxonomy.commonName } : {}),
@@ -1843,6 +2271,15 @@ function normalizeProteome(raw: RawProteome): Proteome {
       ...(raw.taxonomy?.mnemonic ? { mnemonic: raw.taxonomy.mnemonic } : {}),
     },
     proteinCount: raw.proteinCount ?? 0,
+    ...(raw.geneCount ? { geneCount: raw.geneCount } : {}),
+    ...(statsComputed
+      ? {
+          reviewedProteinCount: stats.reviewedProteinCount,
+          unreviewedProteinCount: stats.unreviewedProteinCount,
+          isoformProteinCount: stats.isoformProteinCount,
+        }
+      : {}),
+    ...(cpdStatus ? { cpdStatus } : {}),
     ...(busco
       ? {
           busco: {

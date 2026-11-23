@@ -164,11 +164,11 @@ const ServerConfigSchema = z.object({
   timeoutMs: z.coerce.number().int().positive().default(30_000)
     .describe('Per-request HTTP timeout in milliseconds.'),
   idMappingBudgetMs: z.coerce.number().int().positive().default(8_000)
-    .describe('Wall-clock budget for the inline ID-mapping poll loop. Should be less than timeoutMs.'),
+    .describe('Wall-clock budget for polling an ID-mapping job — a fresh submission and a ticket call alike — before returning a resumable ticket. Should be less than timeoutMs. The whole uniprot_map_ids call, results read included, ends within 50 seconds.'),
   defaultPageSize: z.coerce.number().int().positive().max(500).default(25)
     .describe('Default page size for search and proteome protein listing.'),
   clampLimits: z.stringbool().default(true)
-    .describe('Serve an over-the-cap size at 500 with a notice, accept any section_limit, and accept up to 500 accessions (first 20 distinct fetched, the rest deferred); false rejects them at the schema.'),
+    .describe('Serve an over-the-cap size (search, proteome, ID mapping) at 500 with a notice, accept any section_limit, and accept up to 500 accessions (first 20 distinct fetched, the rest deferred); false rejects them at the schema.'),
 });
 
 let _config: z.infer<typeof ServerConfigSchema> | undefined;
@@ -302,16 +302,18 @@ src/
       uniprot-service.ts                # rest.uniprot.org REST client (init/accessor pattern)
       proteome-query.ts                 # Proteome-scoped query assembly
       query-cursor.ts                   # Opaque cursor bound to tool + assembled query
+      residue-coverage.ts               # Which rows of the position-bearing sections cover one residue (`residue` input)
       return-fields.ts                  # `fields` vocabulary: default/mandatory projections, aliases, ignoredFields split
       types.ts                          # Normalized domain types + ID-mapping enums + accession regex
   mcp-server/
     tools/
       input-limits.ts                   # UNIPROT_CLAMP_LIMITS: countInput(), clampPageSize(), deferral log + counter
+      protein-format.ts                 # Shared content[] fragments: moleculeLabel(), lengthLabel()
     tools/definitions/
       uniprot-search-proteins.tool.ts   # Discovery search
       uniprot-get-entry.tool.ts         # Batch curated entries (partial-success / outline)
       uniprot-map-ids.tool.ts           # Async ID mapping (run → poll → resumable ticket)
-      uniprot-get-proteome.tool.ts      # Reference proteome by UPID / taxon
+      uniprot-get-proteome.tool.ts      # Proteome by UPID, or reference proteome by taxon
       uniprot-get-taxonomy.tool.ts      # Taxonomy record by ID / name
       uniprot-get-sequence.tool.ts      # Canonical + isoform FASTA
     resources/definitions/

@@ -12,12 +12,15 @@ import { createMockContext } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Entry } from '@/services/uniprot/types.js';
 import { ACCESSION_MESSAGE } from '@/services/uniprot/types.js';
+import biophysicochemicalRows from '../fixtures/biophysicochemical.json' with { type: 'json' };
 import p00533Mutagenesis from '../fixtures/p00533-mutagenesis.json' with { type: 'json' };
 import p00533Sections from '../fixtures/p00533-sections.json' with { type: 'json' };
 import p04637Sections from '../fixtures/p04637-sections.json' with { type: 'json' };
 import p07477Default from '../fixtures/p07477-default.json' with { type: 'json' };
+import qualifiedComments from '../fixtures/qualified-comments.json' with { type: 'json' };
 import {
   expectMcpError,
+  featureLocationRow,
   INACTIVE_MESSAGES,
   INACTIVE_STUBS,
   rejectUnmockedFetch,
@@ -107,6 +110,7 @@ describe('entryResource', () => {
     // back as a bounded identity summary + section outline, not the whole payload.
     const heavyEntry: Entry = {
       ...p53,
+      sequenceFlags: ['Fragment'],
       variants: Array.from({ length: 3000 }, (_, i) => ({
         description: `Natural variant number ${i} associated with a phenotype of interest`,
         location: { start: i + 1, end: i + 1 },
@@ -134,6 +138,7 @@ describe('entryResource', () => {
         mnemonic: 'HUMAN',
       },
       length: 393,
+      sequenceFlags: ['Fragment'],
       reviewed: true,
       annotationScore: 5,
       proteinExistence: '1: Evidence at protein level',
@@ -256,6 +261,7 @@ describe('entryResource #35 sections (real service over captured rows)', () => {
       'Chain',
     ]);
     expect((result.comments as { type: string }[]).map((c) => c.type)).toEqual([
+      'COFACTOR',
       'SUBUNIT',
       'PTM',
       'PTM',
@@ -301,6 +307,134 @@ describe('entryResource #35 sections (real service over captured rows)', () => {
       });
       expect(result).not.toHaveProperty(key);
     }
+  });
+});
+
+describe('entryResource feature locations (#46, real service over captured rows)', () => {
+  /** Answer the batch search with one accession's captured rows and read the resource. */
+  async function read(accession: 'O75339' | 'O00139') {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, { results: [featureLocationRow(accession)] })
+          : undefined,
+      ),
+    );
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+    const ctx = createMockContext({ errors: entryResource.errors });
+    return (await entryResource.handler(paramsSchema.parse({ accession }), ctx)) as Entry;
+  }
+
+  it('returns a bound’s modifier and the isoform a position is numbered on, as the tool does', async () => {
+    const cilp1 = await read('O75339');
+    expect(cilp1.processing?.map((f) => f.location)).toStrictEqual([
+      { start: 1, end: 21 },
+      { start: 22, end: 724, endModifier: 'UNSURE' },
+      { start: 725, end: 1184, startModifier: 'UNSURE' },
+    ]);
+    const kif2a = await read('O00139');
+    expect(kif2a.ptms?.map((f) => f.location)).toStrictEqual([
+      { start: 556, end: 556, isoform: 'O00139-4' },
+      { start: 573, end: 573, isoform: 'O00139-4' },
+    ]);
+  });
+});
+
+describe('entryResource molecule, row evidence, and comment notes (#45, real service over captured rows)', () => {
+  it('returns each row’s molecule and evidence, and the comment notes, from the shared normalizer', async () => {
+    const p53Row = required(
+      qualifiedComments.results.find((r) => r.primaryAccession === 'P04637'),
+      'the P04637 fixture row',
+    );
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, { results: [p53Row] })
+          : undefined,
+      ),
+    );
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+    const ctx = createMockContext({ errors: entryResource.errors });
+
+    const result = (await entryResource.handler(
+      paramsSchema.parse({ accession: 'P04637' }),
+      ctx,
+    )) as Entry;
+
+    expect(result.subcellularLocation).toHaveLength(19);
+    expect(result.subcellularLocation?.[6]).toEqual({
+      location: 'Nucleus',
+      evidence: ['PubMed:23752197'],
+      molecule: 'Isoform 1',
+    });
+    expect(result.cofactors?.[0]?.evidence).toHaveLength(7);
+    expect(result.comments?.map((c) => c.type)).toEqual([
+      'COFACTOR',
+      ...Array(7).fill('SUBCELLULAR LOCATION'),
+    ]);
+    expect(result.isoforms?.[0]).toEqual({
+      isoformId: 'P04637-1',
+      name: '1',
+      synonyms: ['p53', 'p53alpha'],
+      sequenceStatus: 'Displayed',
+    });
+  });
+});
+
+describe('entryResource biophysicochemical properties (#47, real service over captured rows)', () => {
+  it('fetches the five names in its default record and returns P00918’s section with its evidence', async () => {
+    const row = required(
+      biophysicochemicalRows.results.find((r) => r.primaryAccession === 'P00918'),
+      'the P00918 fixture row',
+    );
+    const fetchStub = routeUpstream((url) =>
+      url.pathname === '/uniprotkb/search' ? upstreamResponse(200, { results: [row] }) : undefined,
+    );
+    vi.stubGlobal('fetch', fetchStub);
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+    const ctx = createMockContext({ errors: entryResource.errors });
+
+    const result = (await entryResource.handler(
+      paramsSchema.parse({ accession: 'P00918' }),
+      ctx,
+    )) as Entry;
+
+    const fields = new URL(String(fetchStub.mock.calls[0]?.[0])).searchParams
+      .get('fields')
+      ?.split(',');
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        'kinetics',
+        'ph_dependence',
+        'temp_dependence',
+        'redox_potential',
+        'absorption',
+      ]),
+    );
+    const [only] = result.biophysicochemical ?? [];
+    expect(result.biophysicochemical).toHaveLength(1);
+    expect(only?.michaelisConstants?.map((k) => `${k.constant} ${k.unit} ${k.substrate}`)).toEqual([
+      '9.3 mM CO(2)',
+      '11 mM CO(2)',
+      '8.2 mM CO(2)',
+      '82 mM H(2)CO(3)',
+      '2.9 mM 4-nitrophenyl acetate',
+    ]);
+    expect(only?.michaelisConstants?.[0]?.evidence).toEqual(['PubMed:4994926', 'PubMed:7761440']);
+    expect(only?.phDependence).toEqual([
+      {
+        value: 'Optimum pH is 6-8.',
+        evidence: [
+          'PubMed:15667203',
+          'PubMed:17330962',
+          'PubMed:18942852',
+          'PubMed:8262987',
+          'PubMed:9398308',
+        ],
+      },
+    ]);
   });
 });
 

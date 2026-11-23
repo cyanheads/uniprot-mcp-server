@@ -1,9 +1,9 @@
 /**
  * @fileoverview Input caps that follow UNIPROT_CLAMP_LIMITS — `size` on
- *   uniprot_search_proteins and uniprot_get_proteome, `section_limit` and
- *   `accessions` on uniprot_get_entry. With clamping on (the default) an
- *   over-the-cap value is served up to its cap and disclosed; with
- *   UNIPROT_CLAMP_LIMITS=false the cap is advertised and enforced at the schema.
+ *   uniprot_search_proteins, uniprot_get_proteome, and uniprot_map_ids,
+ *   `section_limit` and `accessions` on uniprot_get_entry. With clamping on
+ *   (the default) an over-the-cap value is served up to its cap and disclosed;
+ *   with UNIPROT_CLAMP_LIMITS=false the cap is advertised and enforced at the schema.
  *   Each clamp or deferral writes one log line and adds one to a counter.
  * @module mcp-server/tools/input-limits
  */
@@ -12,7 +12,7 @@ import { type Context, z } from '@cyanheads/mcp-ts-core';
 import { ATTR_MCP_TOOL_NAME, createCounter } from '@cyanheads/mcp-ts-core/utils';
 import { activeServerConfig } from '@/config/server-config.js';
 
-/** UniProt's page maximum: the most rows one search or proteome page returns. */
+/** UniProt's page maximum: the most rows one search, proteome, or ID-mapping results page returns. */
 export const PAGE_SIZE_CAP = 500;
 
 const limited = createCounter(
@@ -65,14 +65,14 @@ export function countInput(strictMaximum: number, describe: (clamped: boolean) =
 }
 
 /**
- * The page size a search or proteome call requests: the caller's, or
- * `PAGE_SIZE_CAP` for a larger one, which is logged, counted, and disclosed by
+ * The page size a search, proteome, or ID-mapping call requests: the caller's,
+ * or `PAGE_SIZE_CAP` for a larger one, which is logged, counted, and disclosed by
  * the returned notice. Under UNIPROT_CLAMP_LIMITS=false the schema has already
  * rejected anything larger.
  */
 export function clampPageSize(
   requested: number,
-  tool: 'uniprot_search_proteins' | 'uniprot_get_proteome',
+  tool: 'uniprot_search_proteins' | 'uniprot_get_proteome' | 'uniprot_map_ids',
   ctx: Context,
 ): { applied: number; notice?: string } {
   if (requested <= PAGE_SIZE_CAP) return { applied: requested };

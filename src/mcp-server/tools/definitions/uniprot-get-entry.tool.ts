@@ -8,8 +8,10 @@
  *   listed in outlinedEntries (a lone accession returns its section outline). The
  *   agent re-calls one accession with sections:[...] to pull only the sections it
  *   needs, paging a list section still too large on its own with
- *   section_limit/section_offset. Entries do not search — accessions come from
- *   uniprot_search_proteins or uniprot_map_ids.
+ *   section_limit/section_offset. A lone accession can be cut to one residue
+ *   (residue): its position-bearing sections keep only the rows covering it,
+ *   before the window and the budget apply. Entries do not search — accessions
+ *   come from uniprot_search_proteins or uniprot_map_ids.
  * @module mcp-server/tools/definitions/uniprot-get-entry
  */
 
@@ -17,9 +19,20 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { markdown, selectSections } from '@cyanheads/mcp-ts-core/utils';
 import { clamping, countInput, recordDeferral } from '@/mcp-server/tools/input-limits.js';
+import { lengthLabel, moleculeLabel } from '@/mcp-server/tools/protein-format.js';
+import {
+  coverResidue,
+  POSITION_SECTIONS,
+  type PositionedRow,
+} from '@/services/uniprot/residue-coverage.js';
 import { entryFieldRequest, ignoredFieldsNotice } from '@/services/uniprot/return-fields.js';
 import type { Entry, InactiveEntry } from '@/services/uniprot/types.js';
-import { ACCESSION_MESSAGE, ACCESSION_REGEX, describeInactive } from '@/services/uniprot/types.js';
+import {
+  ACCESSION_MESSAGE,
+  ACCESSION_REGEX,
+  describeInactive,
+  ENTRY_IDENTITY_KEYS,
+} from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
 
 const EvidencedTextSchema = z
@@ -32,6 +45,46 @@ const EvidencedTextSchema = z
   })
   .describe('An annotation with its source evidence preserved.');
 
+/** UniProt's `molecule` qualifier, one wording on every row and comment that carries it. */
+const MoleculeSchema = z
+  .string()
+  .optional()
+  .describe(
+    'The isoform, chain, or peptide this annotation is about, as UniProt names it, e.g. "Isoform 2" or "Spinorphin". Omitted when UniProt names none, so the annotation is about the protein the entry describes.',
+  );
+
+/** A feature's position, the one shape every feature-built section carries (`FeatureLocation`). */
+const LocationSchema = z.object({
+  start: z
+    .number()
+    .optional()
+    .describe(
+      'Start residue, 1-based on the canonical sequence, or on the isoform named in isoform when set. Omitted only when startModifier is "UNKNOWN".',
+    ),
+  end: z
+    .number()
+    .optional()
+    .describe('End residue, numbered as start is. Omitted only when endModifier is "UNKNOWN".'),
+  startModifier: z
+    .string()
+    .optional()
+    .describe(
+      'UniProt\'s qualifier on the start position when it is not exact: "OUTSIDE" (the feature begins before the sequence shown, at a fragment end or mid-sequence on a multi-fragment entry), "UNSURE" (approximate), or "UNKNOWN" (no position; start is omitted). Omitted when exact.',
+    ),
+  endModifier: z
+    .string()
+    .optional()
+    .describe(
+      'UniProt\'s qualifier on the end position when it is not exact: "OUTSIDE" (the feature runs past the sequence shown), "UNSURE" (approximate), or "UNKNOWN" (no position; end is omitted). Omitted when exact.',
+    ),
+  isoform: z
+    .string()
+    .optional()
+    .describe(
+      'The isoform accession the positions are numbered on, e.g. "O00139-4". Omitted when they are numbered on the canonical sequence.',
+    ),
+});
+
 const FeatureSchema = z
   .object({
     type: z.string().describe('Feature type, e.g. "Modified residue" or "Domain".'),
@@ -39,12 +92,7 @@ const FeatureSchema = z
       .string()
       .optional()
       .describe('Free-text description of the feature. Omitted when absent.'),
-    location: z
-      .object({
-        start: z.number().optional().describe('Start residue position. Omitted when not exact.'),
-        end: z.number().optional().describe('End residue position. Omitted when not exact.'),
-      })
-      .describe('Residue range of the feature.'),
+    location: LocationSchema.describe('Residue range of the feature.'),
     featureId: z
       .string()
       .optional()
@@ -89,12 +137,7 @@ const SiteSchema = FeatureSchema.extend({
 /** A residue change — the shape of a natural variant and of a mutagenesis experiment. */
 const VariantSchema = z.object({
   description: z.string().optional().describe('Variant description. Omitted when none.'),
-  location: z
-    .object({
-      start: z.number().optional().describe('Start residue position. Omitted when not exact.'),
-      end: z.number().optional().describe('End residue position. Omitted when not exact.'),
-    })
-    .describe('Residue range of the variant.'),
+  location: LocationSchema.describe('Residue range of the variant.'),
   original: z.string().optional().describe('Original residue(s). Omitted when not a substitution.'),
   variation: z
     .string()
@@ -113,17 +156,14 @@ const CommentSchema = z
     type: z
       .string()
       .describe(
-        'UniProt comment type, e.g. "PTM", "PATHWAY", "SUBUNIT", or "DISEASE" for a disease note that names no disease.',
+        'UniProt comment type, e.g. "PTM", "PATHWAY", "SUBUNIT"; "SUBCELLULAR LOCATION", "COFACTOR", or "ALTERNATIVE PRODUCTS" for the note of that comment; or "DISEASE" for a disease note that names no disease.',
       ),
     value: z.string().describe('The comment text.'),
     evidence: z
       .array(z.string().describe('A PubMed/source evidence reference, e.g. "PubMed:11057674".'))
       .optional()
       .describe('Source evidence codes. Omitted when none are attached.'),
-    molecule: z
-      .string()
-      .optional()
-      .describe('The isoform or chain the text is about, e.g. "Isoform 2". Omitted when none.'),
+    molecule: MoleculeSchema,
   })
   .describe('A free-text annotation.');
 
@@ -159,6 +199,85 @@ const InteractionSchema = z
   })
   .describe('A binary interaction partner (IntAct).');
 
+/** One BIOPHYSICOCHEMICAL PROPERTIES comment (`Biophysicochemical`). */
+const BiophysicochemicalSchema = z
+  .object({
+    molecule: MoleculeSchema,
+    michaelisConstants: z
+      .array(
+        z
+          .object({
+            constant: z.number().describe('The Michaelis constant, in unit.'),
+            unit: z.string().describe('Concentration unit of constant, e.g. "mM" or "uM".'),
+            substrate: z
+              .string()
+              .describe('Substrate the constant was measured with, e.g. "CO(2)".'),
+            evidence: EvidencedTextSchema.shape.evidence,
+          })
+          .describe('A Michaelis constant (KM) for one substrate.'),
+      )
+      .optional()
+      .describe('Michaelis constants (KM). Omitted when none.'),
+    maximumVelocities: z
+      .array(
+        z
+          .object({
+            velocity: z.number().describe('The maximum velocity, in unit.'),
+            unit: z.string().describe('Rate unit of velocity, e.g. "umol/min/mg".'),
+            enzyme: z
+              .string()
+              .describe(
+                'UniProt\'s text after the unit, naming what was measured, e.g. "enzyme with malonyl-CoA as substrate".',
+              ),
+            evidence: EvidencedTextSchema.shape.evidence,
+          })
+          .describe('A maximum velocity (Vmax).'),
+      )
+      .optional()
+      .describe('Maximum velocities (Vmax). Omitted when none.'),
+    kineticsNote: z
+      .array(EvidencedTextSchema)
+      .optional()
+      .describe(
+        'Note on the kinetic parameters, often kcat values, e.g. "kcat is 1.7 sec(-1) for lyase activity …". Omitted when none.',
+      ),
+    phDependence: z
+      .array(EvidencedTextSchema)
+      .optional()
+      .describe('pH dependence, e.g. "Optimum pH is 6-8.". Omitted when none.'),
+    temperatureDependence: z
+      .array(EvidencedTextSchema)
+      .optional()
+      .describe(
+        'Temperature dependence, e.g. "Optimum temperature is 55 degrees Celsius.". Omitted when none.',
+      ),
+    redoxPotential: z
+      .array(EvidencedTextSchema)
+      .optional()
+      .describe('Redox potential, e.g. "E(0) is -157 mV.". Omitted when none.'),
+    absorption: z
+      .object({
+        maxNm: z
+          .number()
+          .optional()
+          .describe('Absorption maximum in nanometers. Omitted when UniProt gives none.'),
+        approximate: z
+          .literal(true)
+          .optional()
+          .describe('True when UniProt marks maxNm approximate. Omitted otherwise.'),
+        evidence: EvidencedTextSchema.shape.evidence,
+      })
+      .optional()
+      .describe('Light absorption; its note is absorptionNote. Omitted when none.'),
+    absorptionNote: z
+      .array(EvidencedTextSchema)
+      .optional()
+      .describe('Note on the absorption, e.g. "Emission maxima at 702 nm.". Omitted when none.'),
+  })
+  .describe(
+    'One BIOPHYSICOCHEMICAL PROPERTIES comment; UniProt writes one per molecule (the protein, an isoform, or a chain).',
+  );
+
 const EntrySchema = z
   .object({
     accession: z.string().describe('UniProtKB primary accession.'),
@@ -188,6 +307,12 @@ const EntrySchema = z
       })
       .describe('Source organism.'),
     length: z.number().describe('Canonical sequence length in residues.'),
+    sequenceFlags: z
+      .array(z.string().describe('One flag, as UniProt words it.'))
+      .optional()
+      .describe(
+        'UniProt\'s sequence flags: "Fragment" or "Fragments" (several non-adjacent pieces) when the sequence is incomplete, so length counts only the residues UniProt holds, not the whole protein; "Precursor" when the sequence is processed into a shorter mature form (signal, propeptide, transit peptide, or initiator methionine cleaved). Omitted when UniProt flags none.',
+      ),
     reviewed: z.boolean().describe('True for reviewed Swiss-Prot, false for unreviewed TrEMBL.'),
     annotationScore: z.number().describe('Annotation confidence on a 1–5 scale.'),
     proteinExistence: z.string().describe('Protein-existence evidence level.'),
@@ -196,9 +321,13 @@ const EntrySchema = z
       .optional()
       .describe('EC numbers of the recommended name. Absent when none.'),
     function: z
-      .array(EvidencedTextSchema)
+      .array(
+        EvidencedTextSchema.extend({ molecule: MoleculeSchema }).describe(
+          'One FUNCTION text with its source evidence.',
+        ),
+      )
       .optional()
-      .describe('FUNCTION annotations. Absent on most TrEMBL entries.'),
+      .describe('FUNCTION annotations, one row per text. Absent on most TrEMBL entries.'),
     catalyticActivity: z
       .array(
         z
@@ -212,6 +341,8 @@ const EntrySchema = z
               .string()
               .optional()
               .describe('Rhea reaction ID, e.g. "RHEA:10596". Omitted when none.'),
+            evidence: EvidencedTextSchema.shape.evidence,
+            molecule: MoleculeSchema,
           })
           .describe('A catalyzed reaction.'),
       )
@@ -223,11 +354,21 @@ const EntrySchema = z
           .object({
             name: z.string().describe('Cofactor name, e.g. "Zn(2+)".'),
             chebiId: z.string().optional().describe('ChEBI identifier. Omitted when none.'),
+            evidence: EvidencedTextSchema.shape.evidence,
+            molecule: MoleculeSchema,
           })
           .describe('A required cofactor.'),
       )
       .optional()
-      .describe('Cofactors. Absent when none are annotated.'),
+      .describe(
+        'Cofactors. A COFACTOR comment\'s note, e.g. "Binds 1 zinc ion per subunit.", is in comments under type COFACTOR with the same molecule. Absent when none are annotated.',
+      ),
+    biophysicochemical: z
+      .array(BiophysicochemicalSchema)
+      .optional()
+      .describe(
+        'Biophysicochemical properties: enzyme kinetics (KM, Vmax, kcat notes), pH and temperature dependence, redox potential, and absorption, one object per comment, each value with its own evidence. The fields kinetics, ph_dependence, temp_dependence, redox_potential, and absorption each return the whole comment. Absent when none are annotated.',
+      ),
     sites: z
       .array(SiteSchema)
       .optional()
@@ -243,11 +384,23 @@ const EntrySchema = z
               .string()
               .optional()
               .describe('Membrane topology. Omitted when not applicable.'),
+            orientation: z
+              .string()
+              .optional()
+              .describe(
+                'Which side of the membrane the protein faces, e.g. "Cytoplasmic side". Omitted when not recorded.',
+              ),
+            evidence: EvidencedTextSchema.shape.evidence.describe(
+              'Source evidence codes for the location itself, not its topology or orientation. Omitted when none are attached.',
+            ),
+            molecule: MoleculeSchema,
           })
           .describe('A subcellular location.'),
       )
       .optional()
-      .describe('Subcellular locations. Absent when none are annotated.'),
+      .describe(
+        "Subcellular locations, one row per location. A SUBCELLULAR LOCATION comment's note is in comments under type SUBCELLULAR LOCATION with the same molecule. Absent when none are annotated.",
+      ),
     topology: z
       .array(FeatureSchema)
       .optional()
@@ -305,6 +458,10 @@ const EntrySchema = z
           .object({
             isoformId: z.string().describe('Isoform accession, e.g. "P04637-2".'),
             name: z.string().optional().describe('Isoform name. Omitted when none.'),
+            synonyms: z
+              .array(z.string().describe('Another name of the isoform, e.g. "p53alpha".'))
+              .optional()
+              .describe('Other names of the isoform. Omitted when none.'),
             sequenceStatus: z
               .string()
               .optional()
@@ -313,7 +470,9 @@ const EntrySchema = z
           .describe('An alternatively-spliced isoform.'),
       )
       .optional()
-      .describe('Isoforms (ALTERNATIVE PRODUCTS). Absent when only one product.'),
+      .describe(
+        'Isoforms (ALTERNATIVE PRODUCTS). The comment\'s note, e.g. "Additional isoforms seem to exist.", is in comments under type ALTERNATIVE PRODUCTS. Absent when only one product.',
+      ),
     domains: z
       .array(FeatureSchema)
       .optional()
@@ -322,7 +481,7 @@ const EntrySchema = z
       .array(CommentSchema)
       .optional()
       .describe(
-        'Free-text annotations by type (PTM, PATHWAY, SUBUNIT, TISSUE SPECIFICITY, and the other free-text types), plus any DISEASE note that names no disease. Absent when none.',
+        'Free-text annotations by type (PTM, PATHWAY, SUBUNIT, TISSUE SPECIFICITY, and the other free-text types); the notes of SUBCELLULAR LOCATION, COFACTOR, and ALTERNATIVE PRODUCTS comments, under that type; and any DISEASE note that names no disease. Absent when none.',
       ),
     interactions: z
       .array(InteractionSchema)
@@ -408,33 +567,78 @@ const accessionMaximum = () => (clamping() ? ACCESSION_CEILING : FETCH_CAP);
  * UTF-8 bytes of a record's one-accession result across both surfaces, after the
  * output-schema parse the framework applies, rendered through format(). The one
  * measure the inline budget compares, for a lone accession and for each record
- * of a batch alike.
+ * of a batch alike. A residue call's record is measured with the `residue` it returns.
  */
-function recordBytes(record: Entry): number {
-  const result = { kind: 'full' as const, succeeded: [EntrySchema.parse(record)], failed: [] };
+function recordBytes(record: Entry, residue?: number): number {
+  const result = {
+    kind: 'full' as const,
+    succeeded: [EntrySchema.parse(record)],
+    failed: [],
+    ...(residue === undefined ? {} : { residue }),
+  };
   return Buffer.byteLength(
     JSON.stringify({ structuredContent: result, content: formatEntryResult(result) }),
     'utf8',
   );
 }
 
-/** Identity keys a `sections` projection always keeps, so the slice still names its protein. */
-const IDENTITY_KEYS = [
-  'accession',
-  'entryName',
-  'proteinName',
-  'genes',
-  'organism',
-  'length',
-  'reviewed',
-  'annotationScore',
-  'proteinExistence',
-];
+const ResidueCoverageSchema = z.object({
+  residue: z.number().describe('The residue the sections were cut to, as passed.'),
+  sections: z
+    .array(
+      z
+        .object({
+          section: z.string().describe('A position-bearing section key, e.g. "variants".'),
+          covered: z
+            .number()
+            .describe('Rows covering the residue — the rows the record keeps for this section.'),
+          excluded: z
+            .number()
+            .describe(
+              'Rows the rule cannot place on the canonical sequence — numbered on an isoform, a non-bond row with an UNKNOWN bound, or a bond with no known partner. Never kept, so read this before concluding nothing is annotated at the residue.',
+            ),
+          total: z.number().describe("The section's rows before the filter."),
+        })
+        .describe("One section's coverage counts."),
+    )
+    .describe(
+      'One row per position-bearing section filtered, in record order. Empty when the record (or the sections named) carries none.',
+    ),
+});
+
+type ResidueCoverage = z.infer<typeof ResidueCoverageSchema>;
+
+/**
+ * The record with each position-bearing section cut to its rows covering
+ * `residue` — only the sections `named` lists, when set — and a section left with
+ * no covering row dropped; plus each filtered section's counts, in record order.
+ */
+function cutToResidue(
+  entry: Entry,
+  residue: number,
+  named: readonly string[] | undefined,
+): { entry: Entry; coverage: ResidueCoverage['sections'] } {
+  const cut: Record<string, unknown> = { ...entry };
+  const coverage: ResidueCoverage['sections'] = [];
+  for (const section of POSITION_SECTIONS) {
+    const rows: readonly PositionedRow[] | undefined = entry[section];
+    if (!rows || (named && !named.includes(section))) continue;
+    const { rows: covering, ...counts } = coverResidue(rows, residue);
+    coverage.push({ section, ...counts });
+    if (covering.length > 0) cut[section] = covering;
+    else delete cut[section];
+  }
+  return { entry: cut as unknown as Entry, coverage };
+}
+
+/** True for a section `residue` cuts. */
+const isPositionSection = (section: string): boolean =>
+  (POSITION_SECTIONS as readonly string[]).includes(section);
 
 export const getEntry = tool('uniprot_get_entry', {
   title: 'uniprot-mcp-server: get entry',
   description:
-    'Fetch full curated UniProtKB entries by accession in one batch of up to 20 distinct accessions; repeats collapse, and any further accessions return in deferredAccessions to pass as accessions on the next call. Each entry carries alternative names, function, EC numbers and catalytic activity, cofactors, active and binding sites with their ligands, subcellular location and membrane topology, disease involvement, PTMs, molecule processing (signal, propeptides, chains), natural variants, isoforms, domains, free-text comments (PTM, pathway, subunit, tissue specificity), GO terms with their evidence, keywords, cross-references, and Ensembl gene IDs; mutagenesis and IntAct interaction partners come back when sections or fields name them. Partial failures do not abort the batch — resolved entries land in succeeded[] and unknown or inactive (merged, demerged, deleted) accessions in failed[], where an inactive accession names its replacement or UniParc ID. Pass fields to trim the upstream projection; a field this tool cannot return (e.g. sequence) is not requested and is listed in ignoredFields with a notice. Each record is measured on its own across both output surfaces: one within 24,000 UTF-8 bytes returns in succeeded[]; a larger one is listed in outlinedEntries with its size instead. Re-call an outlined accession alone, e.g. accessions:["P04637"], for its section outline (kind: "outline", sections with byte sizes), then add sections:["disease","variants"] to select sections. sections takes exactly one accession; trim a batch with fields instead. All returned list items and cross-reference IDs render in full. A large list section pages with section_limit/section_offset on a re-call naming that one section. This tool does not search: accessions come from uniprot_search_proteins.results[].accession or uniprot_map_ids. Strip any isoform suffix (P04637-2 to P04637) before calling.',
+    'Fetch full curated UniProtKB entries by accession in one batch of up to 20 distinct accessions; repeats collapse, and any further accessions return in deferredAccessions to pass as accessions on the next call. Each entry carries alternative names, function, EC numbers and catalytic activity, cofactors, biophysicochemical properties (enzyme kinetics, pH and temperature dependence, redox potential, absorption), active and binding sites with their ligands, subcellular location and membrane topology, disease involvement, PTMs, molecule processing (signal, propeptides, chains), natural variants, isoforms, domains, free-text comments (PTM, pathway, subunit, tissue specificity), GO terms with their evidence, keywords, cross-references, and Ensembl gene IDs; mutagenesis and IntAct interaction partners come back when sections or fields name them. Partial failures do not abort the batch — resolved entries land in succeeded[] and unknown or inactive (merged, demerged, deleted) accessions in failed[], where an inactive accession names its replacement or UniParc ID. Pass fields to trim the upstream projection; a field this tool cannot return (e.g. sequence) is not requested and is listed in ignoredFields with a notice. Each record is measured on its own across both output surfaces: one within 24,000 UTF-8 bytes returns in succeeded[]; a larger one is listed in outlinedEntries with its size instead. Re-call an outlined accession alone, e.g. accessions:["P04637"], for its section outline (kind: "outline", sections with byte sizes), then add sections:["disease","variants"] to select sections. sections takes exactly one accession; trim a batch with fields instead. All returned list items and cross-reference IDs render in full. A large list section pages with section_limit/section_offset on a re-call naming that one section. To see what is annotated at one residue, pass residue with one accession, e.g. accessions:["P04637"], residue:175, sections:["variants","domains"]: each position-bearing section keeps only its rows covering that canonical position, and residueCoverage counts the covered, excluded, and total rows per section. This tool does not search: accessions come from uniprot_search_proteins.results[].accession or uniprot_map_ids. Strip any isoform suffix (P04637-2 to P04637) before calling.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     accessions: z
@@ -498,14 +702,22 @@ export const getEntry = tool('uniprot_get_entry', {
       .min(0)
       .optional()
       .describe(
-        "Zero-based index of the first item in the windowed section. Defaults to 0. Pass the previous response's nextOffset to page forward. Same requirements as section_limit; set without section_limit, returns every item from this index on.",
+        "Zero-based index of the first item in the windowed section. Defaults to 0. Pass the previous response's nextOffset to page forward, keeping residue when it was set. Same requirements as section_limit; set without section_limit, returns every item from this index on.",
+      ),
+    residue: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe(
+        "A residue position, 1-based on the canonical sequence, e.g. 175. Keeps only the rows covering it in each position-bearing section — sites, topology, ptms, processing, variants, mutagenesis, domains — in UniProt order: a disulfide bond or cross-link covers its two bonded residues; any other row covers start through end, an OUTSIDE or UNSURE bound counting at its value. A row numbered on an isoform, a non-bond row with an UNKNOWN bound, or a bond with no known partner never matches and is counted as excluded. A section with no covering row is left out; residueCoverage gives each section's covered, excluded, and total rows. Other sections return as usual; with sections, only the named ones are filtered and returned. Filtering comes before section_limit/section_offset and the 24,000-byte check, so windows, totalCount, nextOffset, and outline sizes count covering rows — keep residue on every re-call. Requires exactly one accession; a residue past the entry's length fails.",
       ),
   }),
   output: z.object({
     kind: z
       .enum(['full', 'outline'])
       .describe(
-        'Result kind. "full": read succeeded[], failed[], and any outlinedEntries and deferredAccessions — every call with more than one distinct accession or any failure. "outline": a lone accession whose record alone exceeded 24,000 UTF-8 bytes; read sections and re-call it with sections:[...].',
+        'Result kind. "full": read succeeded[], failed[], and any outlinedEntries and deferredAccessions — every call with more than one distinct accession or any failure. "outline": a lone accession whose record alone (cut to the rows covering residue, when set) exceeded 24,000 UTF-8 bytes; read sections and re-call it with sections:[...].',
       ),
     succeeded: z
       .array(EntrySchema)
@@ -537,7 +749,11 @@ export const getEntry = tool('uniprot_get_entry', {
             name: z
               .string()
               .describe('Section identifier — pass a subset in sections:[...] to retrieve it.'),
-            bytes: z.number().describe('Serialized byte size of the section.'),
+            bytes: z
+              .number()
+              .describe(
+                'Serialized byte size of the section — of its rows covering residue, when set.',
+              ),
           })
           .describe('An outlined section with its serialized size.'),
       )
@@ -577,7 +793,13 @@ export const getEntry = tool('uniprot_get_entry', {
       })
       .optional()
       .describe(
-        "The window applied to succeeded[0]'s one requested section. Present only when section_limit or section_offset was set; totalCount and nextOffset place it in the full section.",
+        "The window applied to succeeded[0]'s one requested section. Present only when section_limit or section_offset was set; totalCount and nextOffset place it in the full section — with residue, in the section's rows covering it.",
+      ),
+    residue: z
+      .number()
+      .optional()
+      .describe(
+        'The residue the position-bearing sections were cut to, 1-based on the canonical sequence — the residue input. Present only when residue was set; residueCoverage gives each section its covered, excluded, and total rows.',
       ),
   }),
   enrichment: {
@@ -585,13 +807,13 @@ export const getEntry = tool('uniprot_get_entry', {
       .string()
       .optional()
       .describe(
-        'Re-call guidance. On a single-record outline: re-call that accession with sections:[...] to pull specific sections. When outlinedEntries is present: re-call each listed accession alone. When deferredAccessions is present: pass them as accessions on the next call. On a section window: the section_offset that pages the rest, or why the window came back empty. When ignoredFields is present: the ignored fields, where to get them, and the fields this tool returns.',
+        'Re-call guidance. On a single-record outline: re-call that accession with sections:[...] (and the same residue, when set) to pull specific sections. When outlinedEntries is present: re-call each listed accession alone. When deferredAccessions is present: pass them as accessions on the next call. On a section window: the section_offset that pages the rest, or why the window came back empty. When ignoredFields is present: the ignored fields, where to get them, and the fields this tool returns.',
       ),
     totalCount: z
       .number()
       .optional()
       .describe(
-        'Items in the windowed section before section_limit/section_offset applied. Present on every windowed call; 0 when the record lacks the section.',
+        'Items in the windowed section before section_limit/section_offset applied — with residue, its rows covering that residue. Present on every windowed call; 0 when the record lacks the section or, with residue, no row covers it.',
       ),
     truncated: z
       .boolean()
@@ -603,7 +825,7 @@ export const getEntry = tool('uniprot_get_entry', {
       .number()
       .optional()
       .describe(
-        'section_offset for the next window (same section_limit). Present while items remain.',
+        'section_offset for the next window (same section_limit, and the same residue when set). Present while items remain.',
       ),
     absentSections: z
       .array(z.string().describe('A requested section key the record does not carry.'))
@@ -619,6 +841,9 @@ export const getEntry = tool('uniprot_get_entry', {
       .describe(
         'Names in fields this tool does not return, in request order — left out of the UniProt request, so the call answered without them. Absent when every name was returned.',
       ),
+    residueCoverage: ResidueCoverageSchema.optional().describe(
+      'How the residue input cut the record: for each position-bearing section the record carried (only the named ones, with sections), the rows covering the residue, the rows that could not be placed on the canonical sequence, and the rows before the filter. A section listed with covered 0 is left out of the record. Present only when residue was set, on full and outline results.',
+    ),
   },
   enrichmentTrailer: {
     nextOffset: { label: 'Next section_offset' },
@@ -628,6 +853,20 @@ export const getEntry = tool('uniprot_get_entry', {
     },
     // Ignored names are field-shaped (return-fields FIELD_NAME), so they render without escaping.
     ignoredFields: { render: (names: string[]) => `**Ignored fields:** ${names.join(', ')}` },
+    // Section keys are POSITION_SECTIONS members and the rest are counts, so nothing needs escaping.
+    residueCoverage: {
+      render: ({ residue, sections }: ResidueCoverage) =>
+        `**Residue ${residue} coverage:** ${
+          sections.length
+            ? sections
+                .map(
+                  (s) =>
+                    `${s.section} ${s.covered} of ${s.total} rows${s.excluded ? `, ${s.excluded} excluded (no canonical position)` : ''}`,
+                )
+                .join('; ')
+            : 'no position-bearing section was filtered'
+        }`,
+    },
   },
   errors: [
     {
@@ -664,6 +903,19 @@ export const getEntry = tool('uniprot_get_entry', {
       when: 'UniProtKB rejected the fields value — the message relays UniProt naming the rejected field.',
       recovery:
         'Correct or remove the field named in the message, or omit fields for the default curated set.',
+    },
+    {
+      reason: 'residue_single_accession',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'residue was passed with more than one submitted accession (a repeat counts) — rejected before any request. residue cuts one record.',
+      recovery: 'Re-call one accession at a time with residue, or drop residue for the batch.',
+    },
+    {
+      reason: 'residue_out_of_range',
+      code: JsonRpcErrorCode.ValidationError,
+      when: "residue is past the end of the entry's canonical sequence. Raised once the accession resolves; the message names the canonical length.",
+      recovery:
+        'Pass a residue from 1 to the length the message names, numbered on the canonical sequence.',
     },
   ],
 
@@ -709,6 +961,14 @@ export const getEntry = tool('uniprot_get_entry', {
           `${named[0]} is not a list section, so section_limit and section_offset cannot window it — drop them to fetch it whole. ${listHint}`,
         );
       }
+    }
+
+    if (input.residue !== undefined && input.accessions.length > 1) {
+      throw ctx.fail(
+        'residue_single_accession',
+        `residue cuts one record, but ${input.accessions.length} accessions were passed. Re-call one accession at a time with residue.`,
+        { accessions: input.accessions.length },
+      );
     }
 
     // Repeats collapse to their first occurrence (ACCESSION_REGEX is uppercase-only, so the string is
@@ -784,25 +1044,54 @@ export const getEntry = tool('uniprot_get_entry', {
 
     // A lone accession with no failure: a sections re-call, or the record whole — or, when it alone
     // exceeds the budget, its section outline so the agent re-calls with sections:[...].
-    const entry = failed.length === 0 && succeeded.length === 1 ? succeeded[0] : undefined;
-    if (entry) {
+    const resolved = failed.length === 0 && succeeded.length === 1 ? succeeded[0] : undefined;
+    if (resolved) {
+      // A residue call names one accession (checked above), so it always lands here. The cut runs
+      // first: the projection, the window, and the budget below see only the covering rows.
+      let entry = resolved;
+      if (input.residue !== undefined) {
+        if (input.residue > resolved.length) {
+          throw ctx.fail(
+            'residue_out_of_range',
+            `residue ${input.residue} is past the end of ${resolved.accession}: its canonical sequence has ${resolved.length} residues. Pass a residue from 1 to ${resolved.length}.`,
+            { residue: input.residue, length: resolved.length },
+          );
+        }
+        const cut = cutToResidue(resolved, input.residue, sections?.length ? sections : undefined);
+        entry = cut.entry;
+        ctx.enrich({ residueCoverage: { residue: input.residue, sections: cut.coverage } });
+      }
+      const residueOut = input.residue === undefined ? {} : { residue: input.residue };
+
       if (sections?.length) {
-        // Keys were checked against SECTION_KEYS above; one missing here is a section this record lacks.
+        // Keys were checked against SECTION_KEYS above; one the fetched record lacks is absent. A
+        // section the residue cut emptied is not absent — residueCoverage lists it with covered 0.
+        const fetched = resolved as unknown as Record<string, unknown>;
         const record = entry as unknown as Record<string, unknown>;
-        const absent = [...new Set(sections.filter((s) => !(s in record)))];
+        const absent = [...new Set(sections.filter((s) => !(s in fetched)))];
         const projected = selectSections(
           record,
           sections.filter((s) => s in record),
-          { alwaysKeep: IDENTITY_KEYS },
+          { alwaysKeep: ENTRY_IDENTITY_KEYS },
         );
         if (absent.length > 0) ctx.enrich({ absentSections: absent });
         if (!windowed) {
           sendNotices();
-          return { kind: 'full' as const, succeeded: [projected as unknown as Entry], failed };
+          return {
+            kind: 'full' as const,
+            succeeded: [projected as unknown as Entry],
+            failed,
+            ...residueOut,
+          };
         }
 
         // Validated above: sections names exactly one list section.
         const section = sections[0] as string;
+        // A residue-cut section pages its covering rows, so the guidance names them and keeps residue.
+        const covering =
+          input.residue !== undefined && isPositionSection(section)
+            ? ` covering residue ${input.residue}`
+            : '';
         const offset = input.section_offset ?? 0;
         const items = (projected[section] as unknown[] | undefined) ?? [];
         const end =
@@ -815,12 +1104,12 @@ export const getEntry = tool('uniprot_get_entry', {
           ctx.enrich.truncated({
             shown: end - offset,
             cap: input.section_limit,
-            guidance: `${items.length - end} of ${items.length} items in ${section} remain. Re-call with section_offset:${end} (same section_limit) for the next window.`,
+            guidance: `${items.length - end} of ${items.length} items in ${section}${covering} remain. Re-call with section_offset:${end} (same section_limit${covering ? ' and residue' : ''}) for the next window.`,
           });
           ctx.enrich({ nextOffset: end });
         } else if (items.length > 0 && offset >= items.length) {
           notices.push(
-            `section_offset ${offset} is past the end of ${section}, which holds ${items.length} item(s) — page with section_offset below ${items.length}.`,
+            `section_offset ${offset} is past the end of ${section}, which holds ${items.length} item(s)${covering} — page with section_offset below ${items.length}${covering ? ', keeping residue' : ''}.`,
           );
         }
         sendNotices();
@@ -829,10 +1118,11 @@ export const getEntry = tool('uniprot_get_entry', {
           succeeded: [projected as unknown as Entry],
           failed,
           window: { section, offset },
+          ...residueOut,
         };
       }
 
-      const sizeBytes = recordBytes(entry);
+      const sizeBytes = recordBytes(entry, input.residue);
       if (sizeBytes > INLINE_BUDGET_BYTES) {
         ctx.log.info('Entry exceeded the inline budget — returning its section outline', {
           sizeBytes,
@@ -844,13 +1134,13 @@ export const getEntry = tool('uniprot_get_entry', {
           }))
           .sort((a, b) => b.bytes - a.bytes);
         notices.push(
-          `Re-call with accessions:["${entry.accession}"] and sections:[...] to retrieve selected sections; use section_limit and section_offset for one list section.`,
+          `Re-call with accessions:["${entry.accession}"]${input.residue === undefined ? '' : `, residue:${input.residue},`} and sections:[...] to retrieve selected sections; use section_limit and section_offset for one list section.`,
         );
         sendNotices();
-        return { kind: 'outline' as const, sections: outlinedSections };
+        return { kind: 'outline' as const, sections: outlinedSections, ...residueOut };
       }
       sendNotices();
-      return { kind: 'full' as const, succeeded, failed };
+      return { kind: 'full' as const, succeeded: [entry], failed, ...residueOut };
     }
 
     // Every other call is a full result: a record inlines when its one-accession result fits the
@@ -895,12 +1185,16 @@ function formatEntryResult(result: {
   outlinedEntries?: { accession: string; bytes: number }[];
   deferredAccessions?: string[];
   window?: { section: string; offset: number };
+  residue?: number;
 }): { type: 'text'; text: string }[] {
   const lines = [`**Result kind:** ${result.kind}`];
+  // Qualifies each position-bearing section's heading when the residue input cut it.
+  const covering = result.residue === undefined ? '' : ` covering residue ${result.residue}`;
 
   if (result.sections?.length) {
     // Outline arm: a single oversized record returned as a section listing.
     lines.push('Record too large — re-call with sections:[...] to pull only what you need.');
+    if (covering) lines.push(`Position-bearing section sizes count only the rows${covering}.`);
     for (const s of result.sections) lines.push(`- **${s.name}** — ${s.bytes} bytes`);
   }
   if (result.outlinedEntries?.length)
@@ -916,7 +1210,8 @@ function formatEntryResult(result: {
     lines.push(
       `**Deferred accessions** — ${result.deferredAccessions.length} not fetched, past the first ${FETCH_CAP} distinct; re-call with accessions:${JSON.stringify(result.deferredAccessions)}`,
     );
-  const windowSection = result.window?.section;
+  const inWindow = (section: string) =>
+    result.window?.section === section ? ' in this window' : '';
   for (const e of result.succeeded ?? []) {
     lines.push(`# ${e.proteinName ?? e.entryName} (${e.accession})`);
     lines.push(`**Entry:** ${e.entryName}`);
@@ -924,7 +1219,7 @@ function formatEntryResult(result: {
       [
         e.reviewed ? 'Reviewed (Swiss-Prot)' : 'Unreviewed (TrEMBL)',
         `Score ${e.annotationScore}/5`,
-        `${e.length} aa`,
+        lengthLabel(e.length, e.sequenceFlags),
         e.proteinExistence,
       ].join(' · '),
     );
@@ -943,28 +1238,32 @@ function formatEntryResult(result: {
     }
     if (e.alternativeNames?.length)
       lines.push(`**Alternative names:** ${e.alternativeNames.join('; ')}`);
-    if (e.function?.length)
-      lines.push(
-        `**Function:** ${e.function
-          .map((f) => `${f.value}${f.evidence?.length ? ` (${f.evidence.join(', ')})` : ''}`)
-          .join(' ')}`,
-      );
+    if (e.function?.length) {
+      lines.push('**Function:**');
+      for (const f of e.function)
+        lines.push(`- ${moleculeLabel(f.molecule)}${f.value}${evidenceMark(f.evidence)}`);
+    }
     if (e.ecNumbers?.length) lines.push(`**EC numbers:** ${e.ecNumbers.join(', ')}`);
     if (e.catalyticActivity?.length) {
       lines.push('**Catalytic activity:**');
       for (const r of e.catalyticActivity)
         lines.push(
-          `- ${r.name}${r.rheaId ? ` (${r.rheaId})` : ''}${r.ecNumber ? ` [EC ${r.ecNumber}]` : ''}`,
+          `- ${moleculeLabel(r.molecule)}${r.name}${r.rheaId ? ` (${r.rheaId})` : ''}${r.ecNumber ? ` [EC ${r.ecNumber}]` : ''}${evidenceMark(r.evidence)}`,
         );
     }
-    if (e.cofactors?.length)
-      lines.push(
-        `**Cofactors:** ${e.cofactors.map((c) => `${c.name}${c.chebiId ? ` (${c.chebiId})` : ''}`).join(', ')}`,
-      );
+    if (e.cofactors?.length) {
+      lines.push('**Cofactors:**');
+      for (const c of e.cofactors)
+        lines.push(
+          `- ${moleculeLabel(c.molecule)}${c.name}${c.chebiId ? ` (${c.chebiId})` : ''}${evidenceMark(c.evidence)}`,
+        );
+    }
+    if (e.biophysicochemical?.length) {
+      lines.push('**Biophysicochemical properties:**');
+      for (const b of e.biophysicochemical) lines.push(...biophysicochemicalLines(b));
+    }
     if (e.sites?.length) {
-      lines.push(
-        `**Sites:** ${e.sites.length}${windowSection === 'sites' ? ' in this window' : ''}`,
-      );
+      lines.push(`**Sites:** ${e.sites.length}${covering}${inWindow('sites')}`);
       for (const s of e.sites) {
         const ligand = s.ligand
           ? ` — ${s.ligand.name}${s.ligand.chebiId ? ` (${s.ligand.chebiId})` : ''}${s.ligand.label ? ` label ${s.ligand.label}` : ''}${s.ligand.note ? `, ${s.ligand.note}` : ''}`
@@ -975,12 +1274,17 @@ function formatEntryResult(result: {
         lines.push(`${featureLine(s)}${ligand}${part}`);
       }
     }
-    if (e.subcellularLocation?.length)
-      lines.push(
-        `**Subcellular location:** ${e.subcellularLocation.map((l) => l.location + (l.topology ? ` (${l.topology})` : '')).join('; ')}`,
-      );
+    if (e.subcellularLocation?.length) {
+      lines.push('**Subcellular location:**');
+      for (const l of e.subcellularLocation) {
+        const membrane = [l.topology, l.orientation].filter(Boolean).join('; ');
+        lines.push(
+          `- ${moleculeLabel(l.molecule)}${l.location}${membrane ? ` (${membrane})` : ''}${evidenceMark(l.evidence)}`,
+        );
+      }
+    }
     if (e.topology?.length) {
-      lines.push('**Topology:**');
+      lines.push(`**Topology:**${covering}`);
       for (const f of e.topology) lines.push(featureLine(f));
     }
     if (e.disease?.length) {
@@ -992,53 +1296,47 @@ function formatEntryResult(result: {
     }
     if (e.variants?.length) {
       lines.push(
-        `**Variants:** ${e.variants.length} natural variant(s)${windowSection === 'variants' ? ' in this window' : ''}`,
+        `**Variants:** ${e.variants.length} natural variant(s)${covering}${inWindow('variants')}`,
       );
       for (const v of e.variants) lines.push(residueChangeLine(v));
     }
     if (e.mutagenesis?.length) {
-      lines.push(
-        `**Mutagenesis:** ${e.mutagenesis.length}${windowSection === 'mutagenesis' ? ' in this window' : ''}`,
-      );
+      lines.push(`**Mutagenesis:** ${e.mutagenesis.length}${covering}${inWindow('mutagenesis')}`);
       for (const m of e.mutagenesis) lines.push(residueChangeLine(m));
     }
     if (e.ptms?.length) {
-      lines.push(`**PTMs:** ${e.ptms.length}${windowSection === 'ptms' ? ' in this window' : ''}`);
-      for (const p of e.ptms) {
-        const range =
-          p.location.start != null
-            ? ` @${p.location.start}${p.location.end != null && p.location.end !== p.location.start ? `-${p.location.end}` : ''}`
-            : '';
-        lines.push(
-          `- ${p.type}${range}${p.featureId ? ` [${p.featureId}]` : ''}${p.description ? `: ${p.description}` : ''}`,
-        );
-      }
+      lines.push(`**PTMs:** ${e.ptms.length}${covering}${inWindow('ptms')}`);
+      for (const p of e.ptms) lines.push(featureLine(p, '@'));
     }
     if (e.processing?.length) {
-      lines.push('**Processing:**');
+      lines.push(`**Processing:**${covering}`);
       for (const f of e.processing) lines.push(featureLine(f));
     }
     if (e.domains?.length) {
-      lines.push('**Domains/regions:**');
-      for (const d of e.domains)
-        lines.push(
-          `- ${d.type}${d.location.start != null ? ` ${d.location.start}-${d.location.end ?? '?'}` : ''}${d.featureId ? ` [${d.featureId}]` : ''}${d.description ? `: ${d.description}` : ''}`,
-        );
+      lines.push(`**Domains/regions:**${covering}`);
+      for (const d of e.domains) lines.push(featureLine(d));
     }
     if (e.isoforms?.length)
       lines.push(
-        `**Isoforms:** ${e.isoforms.map((i) => `${i.isoformId}${i.name ? ` (${i.name})` : ''}${i.sequenceStatus ? ` [${i.sequenceStatus}]` : ''}`).join(', ')}`,
+        `**Isoforms:** ${e.isoforms
+          .map((i) => {
+            const names = [i.name, i.synonyms?.length ? `synonyms ${i.synonyms.join(', ')}` : '']
+              .filter(Boolean)
+              .join('; ');
+            return `${i.isoformId}${names ? ` (${names})` : ''}${i.sequenceStatus ? ` [${i.sequenceStatus}]` : ''}`;
+          })
+          .join(', ')}`,
       );
     if (e.comments?.length) {
       lines.push('**Comments:**');
       for (const c of e.comments)
         lines.push(
-          `- ${c.type}${c.molecule ? ` (${c.molecule})` : ''}: ${c.value}${c.evidence?.length ? ` (${c.evidence.join(', ')})` : ''}`,
+          `- ${c.type}${c.molecule ? ` (${c.molecule})` : ''}: ${c.value}${evidenceMark(c.evidence)}`,
         );
     }
     if (e.interactions?.length) {
       lines.push(
-        `**Interactions:** ${e.interactions.length} partner(s)${windowSection === 'interactions' ? ' in this window' : ''}`,
+        `**Interactions:** ${e.interactions.length} partner(s)${inWindow('interactions')}`,
       );
       for (const i of e.interactions)
         lines.push(
@@ -1073,18 +1371,84 @@ function formatEntryResult(result: {
   return [{ type: 'text', text: lines.join('\n').trim() }];
 }
 
-/** A feature with its residue span — one residue as "- Site 194", a range as "- Transmembrane 646-668". */
-function featureLine(f: z.infer<typeof FeatureSchema>): string {
-  const { start, end } = f.location;
-  const span = start === end ? `${start ?? '?'}` : `${start ?? '?'}-${end ?? '?'}`;
-  return `- ${f.type} ${span}${f.featureId ? ` [${f.featureId}]` : ''}${f.description ? `: ${f.description}` : ''}`;
+/** A row's evidence as a trailing " (PubMed:1, PubMed:2)", or nothing when it has none. */
+function evidenceMark(evidence: string[] | undefined): string {
+  return evidence?.length ? ` (${evidence.join(', ')})` : '';
+}
+
+/**
+ * One biophysicochemical object as rows in UniProt's wording ("KM=9.3 mM for CO(2)",
+ * "Abs(max)=280 nm"), each labelled with the object's molecule and closed by its own evidence.
+ * UniProt writes one comment per molecule, so the label tells the objects apart.
+ */
+function biophysicochemicalLines(b: z.infer<typeof BiophysicochemicalSchema>): string[] {
+  const rows: string[] = [];
+  const row = (text: string, evidence: string[] | undefined) =>
+    rows.push(`- ${moleculeLabel(b.molecule)}${text}${evidenceMark(evidence)}`);
+  for (const k of b.michaelisConstants ?? [])
+    row(`KM=${k.constant} ${k.unit} for ${k.substrate}`, k.evidence);
+  for (const v of b.maximumVelocities ?? [])
+    row(`Vmax=${v.velocity} ${v.unit} ${v.enzyme}`, v.evidence);
+  for (const t of b.kineticsNote ?? []) row(`Kinetics note: ${t.value}`, t.evidence);
+  for (const t of b.phDependence ?? []) row(`pH dependence: ${t.value}`, t.evidence);
+  for (const t of b.temperatureDependence ?? [])
+    row(`Temperature dependence: ${t.value}`, t.evidence);
+  for (const t of b.redoxPotential ?? []) row(`Redox potential: ${t.value}`, t.evidence);
+  if (b.absorption) {
+    const { maxNm, approximate, evidence } = b.absorption;
+    const max = `Abs(max)=${maxNm} nm${approximate ? ' (approximate)' : ''}`;
+    row(maxNm === undefined ? 'Absorption' : `Absorption: ${max}`, evidence);
+  }
+  for (const t of b.absorptionNote ?? []) row(`Absorption note: ${t.value}`, t.evidence);
+  return rows;
+}
+
+/**
+ * A feature row: its type and span ("- Site 194", "- Transmembrane 646..668"), then its
+ * id and description. PTM rows pass `marker` "@" ("- Disulfide bond @31..96").
+ */
+function featureLine(f: z.infer<typeof FeatureSchema>, marker = ''): string {
+  return `- ${f.type} ${marker}${locationSpan(f.location)}${f.featureId ? ` [${f.featureId}]` : ''}${f.description ? `: ${f.description}` : ''}`;
 }
 
 /** A residue change — a natural variant or a mutagenesis row — with its cross-references. */
 function residueChangeLine(v: z.infer<typeof VariantSchema>): string {
-  const pos =
-    v.location.start === v.location.end || v.location.end == null
-      ? `${v.location.start ?? '?'}`
-      : `${v.location.start ?? '?'}-${v.location.end}`;
-  return `- ${pos}${v.original && v.variation ? ` ${v.original}→${v.variation}` : ''}${v.featureId ? ` [${v.featureId}]` : ''}${v.description ? `: ${v.description}` : ''}`;
+  return `- ${locationSpan(v.location)}${v.original && v.variation ? ` ${v.original}→${v.variation}` : ''}${v.featureId ? ` [${v.featureId}]` : ''}${v.description ? `: ${v.description}` : ''}`;
+}
+
+/** The location modifiers UniProt's notation marks on the bound itself. */
+const MARKED_MODIFIERS: ReadonlySet<string> = new Set(['OUTSIDE', 'UNSURE', 'UNKNOWN']);
+
+/**
+ * A feature location in UniProt's flat-file notation — the one span text every
+ * feature-built section renders. Each bound is its 1-based residue (`start`,
+ * `end`): `<n` / `>n` when its modifier is OUTSIDE (the feature begins before, or
+ * runs past, the sequence shown), `?n` when UNSURE (approximate), bare `?` when
+ * UNKNOWN (no position). The bounds join with `..`, and a span whose two bounds
+ * read the same renders once (`144`, not `144..144`). `isoform` prefixes the span
+ * when the positions are numbered on that isoform (`O00139-4:556`). A modifier
+ * outside those three reads `?n` and is named after the span, so `content[]`
+ * carries every value `structuredContent` does.
+ */
+function locationSpan(location: z.infer<typeof LocationSchema>): string {
+  const { start, end, startModifier, endModifier, isoform } = location;
+  const from = boundToken(start, startModifier, '<');
+  const to = boundToken(end, endModifier, '>');
+  const span = `${isoform ? `${isoform}:` : ''}${from === to ? from : `${from}..${to}`}`;
+  const unmarked = [
+    startModifier && !MARKED_MODIFIERS.has(startModifier) ? `start modifier ${startModifier}` : '',
+    endModifier && !MARKED_MODIFIERS.has(endModifier) ? `end modifier ${endModifier}` : '',
+  ].filter(Boolean);
+  return unmarked.length ? `${span} (${unmarked.join(', ')})` : span;
+}
+
+/** One bound in UniProt's notation; `outside` is the marker an OUTSIDE bound takes on this side. */
+function boundToken(
+  position: number | undefined,
+  modifier: string | undefined,
+  outside: '<' | '>',
+): string {
+  if (position === undefined) return '?';
+  if (modifier === undefined) return `${position}`;
+  return `${modifier === 'OUTSIDE' ? outside : '?'}${position}`;
 }

@@ -173,6 +173,26 @@ describe('clampPageSize', () => {
       ]);
     },
   );
+
+  it('names uniprot_map_ids on the log line and the count of an ID-mapping page clamp', () => {
+    const ctx = createMockContext();
+    expect(clampPageSize(501, 'uniprot_map_ids', ctx).applied).toBe(500);
+    expect((ctx.log as MockContextLogger).calls).toEqual([
+      expect.objectContaining({
+        data: { tool: 'uniprot_map_ids', requested: 501, applied: 500 },
+      }),
+    ]);
+    expect(recorded.adds).toEqual([
+      {
+        value: 1,
+        attributes: {
+          'mcp.tool.name': 'uniprot_map_ids',
+          'uniprot.input.name': 'size',
+          'uniprot.input.limit': 'clamp',
+        },
+      },
+    ]);
+  });
 });
 
 describe('recordDeferral', () => {

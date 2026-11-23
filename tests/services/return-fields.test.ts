@@ -19,7 +19,7 @@ import {
 const ENTRY_IDENTITY =
   'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence';
 const SEARCH_IDENTITY =
-  'accession,id,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence';
+  'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence';
 
 /** The names between "Supported fields: " and the xref_ clause of an entry notice. */
 function supportedList(notice: string): string[] {
@@ -92,6 +92,15 @@ describe('default projections', () => {
       'xref_string',
     ])
       expect(defaults).toContain(field);
+    // The biophysicochemical section (#47): any one name returns the whole comment.
+    for (const field of [
+      'kinetics',
+      'ph_dependence',
+      'temp_dependence',
+      'redox_potential',
+      'absorption',
+    ])
+      expect(defaults).toContain(field);
     expect(new Set(defaults).size).toBe(defaults.length);
   });
 
@@ -101,6 +110,11 @@ describe('default projections', () => {
       'cc_function',
       'cc_catalytic_activity',
       'cc_cofactor',
+      'kinetics',
+      'ph_dependence',
+      'temp_dependence',
+      'redox_potential',
+      'absorption',
       'cc_subcellular_location',
       'cc_disease',
       'ft_mod_res',
@@ -215,6 +229,17 @@ describe('entryFieldRequest', () => {
     expect(entryFieldRequest(names)).toEqual({ fields: names, ignored: [] });
   });
 
+  it('keeps the five biophysicochemical names, lowercased (#47)', () => {
+    expect(
+      entryFieldRequest(
+        'accession,KINETICS,Ph_Dependence,temp_dependence,redox_potential,absorption',
+      ),
+    ).toEqual({
+      fields: 'accession,kinetics,ph_dependence,temp_dependence,redox_potential,absorption',
+      ignored: [],
+    });
+  });
+
   it('keeps any xref_ field, hyphenated database names included', () => {
     expect(
       entryFieldRequest('xref_reactome,XREF_PDB,xref_go,xref_notadb,xref_mane-select'),
@@ -302,13 +327,19 @@ describe('ignoredFieldsNotice', () => {
     expect(notice).not.toContain('uniprot_get_entry returns');
     expect(notice.endsWith(', and any `xref_<database>` field, e.g. xref_interpro.')).toBe(true);
     const supported = supportedList(notice);
-    // 72 return fields (15 identity, 7 structured comments, 18 free-text, 26 features, 6 GO/keyword) + 2 aliases.
-    expect(supported).toHaveLength(74);
+    // 77 return fields (15 identity, 7 structured comments, 5 biophysicochemical, 18 free-text,
+    // 26 features, 6 GO/keyword) + 2 aliases.
+    expect(supported).toHaveLength(79);
     for (const field of [
       'accession',
       'ec',
       'gene_oln',
       'cc_ptm',
+      'kinetics',
+      'ph_dependence',
+      'temp_dependence',
+      'redox_potential',
+      'absorption',
       'ft_mutagen',
       'cc_interaction',
       'go_id',
@@ -323,6 +354,16 @@ describe('ignoredFieldsNotice', () => {
   it('routes search fields an entry returns to uniprot_get_entry, in one re-call', () => {
     expect(ignoredFieldsNotice(['ec', 'xref_pdb', 'ft_helix', 'keywordid'], 'search')).toBe(
       'Ignored fields: ec, xref_pdb, ft_helix, keywordid — search hits do not carry them, so they were not requested from UniProt. uniprot_get_entry returns ec, xref_pdb, keywordid: pass these results\' accessions with fields:"ec,xref_pdb,keywordid". Supported fields: accession, id, protein_name, gene_names, gene_primary, gene_synonym, gene_oln, gene_orf, organism_name, organism_id, length, reviewed, annotation_score, protein_existence, cc_function.',
+    );
+  });
+
+  it('routes a biophysicochemical name a search ignores to uniprot_get_entry (#47)', () => {
+    expect(searchFieldRequest('accession,kinetics')).toEqual({
+      fields: 'accession',
+      ignored: ['kinetics'],
+    });
+    expect(ignoredFieldsNotice(['kinetics'], 'search')).toContain(
+      'uniprot_get_entry returns kinetics: pass these results\' accessions with fields:"kinetics".',
     );
   });
 

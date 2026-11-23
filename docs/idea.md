@@ -54,7 +54,8 @@ uniprot_map_ids          — translate IDs across databases via the UniProt ID-m
                           ChEMBL / GeneID. from_db / to_db enums. The glue that lets an
                           agent arrive from any sibling server's identifier.
 
-uniprot_get_proteome     — reference proteome for an organism by UPID or taxon ID:
+uniprot_get_proteome     — a proteome by UPID (reference or not), or an organism's
+                          reference proteome by taxon ID:
                           protein count, completeness (BUSCO), and the protein set
                           (paginated / DataCanvas for large proteomes). "Give me the
                           human reference proteome."

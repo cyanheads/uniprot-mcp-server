@@ -21,6 +21,8 @@ import {
   expectMcpError,
   RAW_ENTRIES,
   RAW_HUMAN_PROTEOME,
+  RAW_PROTEOMES,
+  RAW_SNIPPET_ROWS,
   rejectUnmockedFetch,
   requestedUrls,
   required,
@@ -268,6 +270,83 @@ describe('getProteome function snippet (#36, real service)', () => {
   });
 });
 
+describe('getProteome function snippet molecule (#45, real service)', () => {
+  it("labels an include_proteins row's snippet with its FUNCTION comment's molecule on both surfaces, and an unqualified one not at all", async () => {
+    getProteomeMock.mockResolvedValue(humanProteome);
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, { results: [RAW_SNIPPET_ROWS.P01275, RAW_SNIPPET_ROWS.P04637] })
+          : undefined,
+      ),
+    );
+    getProteomeProteinsMock.mockImplementation(realService.getProteomeProteins.bind(realService));
+
+    const result = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as {
+      proteins: { accession: string; functionSnippetMolecule?: string }[];
+    };
+    expect(out.proteins.map((hit) => [hit.accession, hit.functionSnippetMolecule])).toEqual([
+      ['P01275', 'Glucagon'],
+      ['P04637', undefined],
+    ]);
+    expect(out.proteins[1]).not.toHaveProperty('functionSnippetMolecule');
+    expect(
+      contentText(result)
+        .split('\n')
+        .filter((line) => line.startsWith('  ') && !line.includes(' · ')),
+    ).toEqual([
+      '  Glucagon: Plays a key role in glucose metabolism and homeostasis. Regulates blood glucose by increasing gluconeogenesis and decreasing glycolysis. A counterregulatory hormone of insulin, raises plasma glucose levels in response to insulin-induced hypoglycemia.',
+      '  Multifunctional transcription factor that induces cell cycle arrest, DNA repair or apoptosis upon binding to its target DNA sequence.',
+    ]);
+  });
+});
+
+describe('getProteome sequence flags (real service)', () => {
+  it('qualifies a flagged include_proteins row’s length on both surfaces, and leaves an unflagged one bare', async () => {
+    getProteomeMock.mockResolvedValue(humanProteome);
+    // P01275 carries "Precursor" as rest.uniprot.org sent it (2026-11-23); P04637 carries no flag.
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, { results: [RAW_SNIPPET_ROWS.P01275, RAW_SNIPPET_ROWS.P04637] })
+          : undefined,
+      ),
+    );
+    getProteomeProteinsMock.mockImplementation(realService.getProteomeProteins.bind(realService));
+
+    const result = await runToolContract(getProteome, {
+      upid: 'UP000005640',
+      include_proteins: true,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as {
+      proteins: { accession: string; sequenceFlags?: string[] }[];
+    };
+    expect(out.proteins.map((hit) => [hit.accession, hit.sequenceFlags])).toEqual([
+      ['P01275', ['Precursor']],
+      ['P04637', undefined],
+    ]);
+    expect(out.proteins[1]).not.toHaveProperty('sequenceFlags');
+    expect(
+      contentText(result)
+        .split('\n')
+        .filter((line) => line.includes(' · score ')),
+    ).toEqual([
+      '  reviewed · score 5/5 · 180 aa (Precursor) · 1: Evidence at protein level · Homo sapiens (Human) [taxon 9606]',
+      '  reviewed · score 5/5 · 393 aa · 1: Evidence at protein level · Homo sapiens (Human) [taxon 9606]',
+    ]);
+  });
+});
+
 describe('getProteome', () => {
   it('echoes an empty protein filter and no-match notice on both surfaces', async () => {
     getProteomeMock.mockResolvedValue(humanProteome);
@@ -428,7 +507,7 @@ describe('getProteome', () => {
       result.structuredContent as { error?: { data?: { recovery?: { hint?: string } } } }
     ).error;
     expect(envelope?.data?.recovery?.hint).toBe(
-      'Confirm the organism has a reference proteome, or look it up with uniprot_get_taxonomy.',
+      'Check the UPID. For a taxon ID with no reference proteome, re-call with a parent taxon ID from its uniprot_get_taxonomy lineage to list the reference proteomes of related organisms.',
     );
   });
 
@@ -863,6 +942,115 @@ describe('getProteome', () => {
     expect(text).toContain('UP000000001');
     expect(text).not.toContain('BUSCO');
     expect(text).not.toContain('Genome assembly');
+    expect(text).not.toContain('**Genes:**');
+    expect(text).not.toContain('proteins:**');
+    expect(text).not.toContain('CPD');
     expect(text).not.toContain('undefined');
+  });
+
+  describe('gene count, protein statistics, CPD status, and exclusion reasons (#49, real service)', () => {
+    /** One upid call through the real service, `/proteomes/search` answering with `raw`. */
+    const callWith = (raw: { id: string }) => {
+      vi.stubGlobal(
+        'fetch',
+        routeUpstream((url) =>
+          url.pathname === '/proteomes/search'
+            ? upstreamResponse(200, { results: [raw] })
+            : undefined,
+        ),
+      );
+      getProteomeMock.mockImplementation(realService.getProteome.bind(realService));
+      return runToolContract(getProteome, { upid: raw.id });
+    };
+    const COUNT_KEYS = [
+      'geneCount',
+      'reviewedProteinCount',
+      'unreviewedProteinCount',
+      'isoformProteinCount',
+      'cpdStatus',
+      'exclusionReasons',
+    ];
+    const countsOf = (result: { structuredContent?: unknown }) =>
+      Object.fromEntries(
+        Object.entries((result.structuredContent as { proteome: object }).proteome).filter(
+          ([key]) => COUNT_KEYS.includes(key),
+        ),
+      );
+    /** The content[] lines that carry the #49 fields and the type, in render order. */
+    const metadataLines = (result: { content: { type: string; text?: string }[] }) =>
+      contentText(result)
+        .split('\n')
+        .filter((line) => /^\*\*(Type|Genes|Reviewed|CPD)/.test(line));
+
+    it('renders the human reference proteome counts and CPD status on both surfaces', async () => {
+      const result = await callWith(RAW_PROTEOMES.human);
+      expect(result.isError).toBeFalsy();
+      expect(countsOf(result)).toStrictEqual({
+        geneCount: 20652,
+        reviewedProteinCount: 20414,
+        unreviewedProteinCount: 243472,
+        isoformProteinCount: 22131,
+        cpdStatus: 'Outlier (high value)',
+      });
+      expect(metadataLines(result)).toEqual([
+        '**Type:** Reference proteome · **Proteins:** 263886 · **Taxon:** 9606 (HUMAN)',
+        '**Genes:** 20652 · **Reviewed proteins:** 20414 · **Unreviewed proteins:** 243472 · **Additional isoforms:** 22131',
+        '**CPD status:** Outlier (high value)',
+      ]);
+    });
+
+    it("renders E. coli K-12's real 0 unreviewed count on both surfaces", async () => {
+      const result = await callWith(RAW_PROTEOMES.ecoli);
+      expect(countsOf(result)).toStrictEqual({
+        geneCount: 4403,
+        reviewedProteinCount: 4403,
+        unreviewedProteinCount: 0,
+        isoformProteinCount: 12,
+        cpdStatus: 'Close to standard (low value)',
+      });
+      expect(metadataLines(result)).toEqual([
+        '**Type:** Reference proteome · **Proteins:** 4403 · **Taxon:** 83333 (ECOLI)',
+        '**Genes:** 4403 · **Reviewed proteins:** 4403 · **Unreviewed proteins:** 0 · **Additional isoforms:** 12',
+        '**CPD status:** Close to standard (low value)',
+      ]);
+    });
+
+    it("omits a non-reference proteome's placeholder zeros on both surfaces, keeping its CPD status", async () => {
+      const result = await callWith(RAW_PROTEOMES.nonReference);
+      expect(countsOf(result)).toStrictEqual({ cpdStatus: 'Close to standard (low value)' });
+      expect(metadataLines(result)).toEqual([
+        '**Type:** Non Reference proteome · **Proteins:** 4227 · **Taxon:** 83333 (ECOLI)',
+        '**CPD status:** Close to standard (low value)',
+      ]);
+    });
+
+    it("names an excluded proteome's exclusion reasons beside its type on both surfaces", async () => {
+      const result = await callWith(RAW_PROTEOMES.excluded);
+      expect(countsOf(result)).toStrictEqual({
+        cpdStatus: 'Outlier (low value)',
+        exclusionReasons: ['genome length too small'],
+      });
+      expect(metadataLines(result)).toEqual([
+        '**Type:** Excluded (genome length too small) · **Proteins:** 3547 · **Taxon:** 1110693 (ECOLI)',
+        '**CPD status:** Outlier (low value)',
+      ]);
+    });
+
+    it('joins several exclusion reasons and renders a lone statistic without its siblings', () => {
+      const text = contentText({
+        content: getProteome.format!({
+          proteome: {
+            ...humanProteome,
+            proteomeType: 'Excluded',
+            exclusionReasons: ['contaminated', 'unverified source organism'],
+            isoformProteinCount: 0,
+          },
+        }),
+      });
+      expect(text).toContain(
+        '**Type:** Excluded (contaminated; unverified source organism) · **Proteins:** 147506',
+      );
+      expect(text).toContain('\n**Additional isoforms:** 0\n');
+    });
   });
 });

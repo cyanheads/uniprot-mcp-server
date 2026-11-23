@@ -51,7 +51,7 @@
     "UNIPROT_ID_MAPPING_BUDGET_MS": {
       "type": "string",
       "title": "ID-mapping poll budget (ms)",
-      "description": "Milliseconds uniprot_map_ids polls a mapping job inline before returning a resumable ticket; keep it below the request timeout. Leave blank for 8000.",
+      "description": "Milliseconds uniprot_map_ids polls a mapping job — a fresh submission and a ticket call alike — before returning a resumable ticket; keep it below the request timeout. The whole call, results read included, ends within 50 seconds. Leave blank for 8000.",
       "default": "",
       "required": false
     },
@@ -65,7 +65,7 @@
     "UNIPROT_CLAMP_LIMITS": {
       "type": "string",
       "title": "Serve over-the-cap inputs",
-      "description": "Serve an over-the-cap size at 500 with a notice, accept any section_limit, and accept up to 500 accessions on uniprot_get_entry (the first 20 distinct fetched, the rest deferred). Set false to reject them instead (size and section_limit above 500, more than 20 accessions). Leave blank for true.",
+      "description": "Serve an over-the-cap size (search, proteome, ID mapping) at 500 with a notice, accept any section_limit, and accept up to 500 accessions on uniprot_get_entry (the first 20 distinct fetched, the rest deferred). Set false to reject them instead (size and section_limit above 500, more than 20 accessions). Leave blank for true.",
       "default": "",
       "required": false
     }

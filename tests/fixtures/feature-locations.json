@@ -1,0 +1,177 @@
+{
+  "O75339": [
+    {
+      "type": "Signal",
+      "location": {
+        "start": { "value": 1, "modifier": "EXACT" },
+        "end": { "value": 21, "modifier": "EXACT" }
+      },
+      "description": "",
+      "evidences": [{ "evidenceCode": "ECO:0000255" }]
+    },
+    {
+      "type": "Chain",
+      "location": {
+        "start": { "value": 22, "modifier": "EXACT" },
+        "end": { "value": 724, "modifier": "UNSURE" }
+      },
+      "description": "Cartilage intermediate layer protein 1 C1",
+      "featureId": "PRO_0000014672"
+    },
+    {
+      "type": "Chain",
+      "location": {
+        "start": { "value": 725, "modifier": "UNSURE" },
+        "end": { "value": 1184, "modifier": "EXACT" }
+      },
+      "description": "Cartilage intermediate layer protein 1 C2",
+      "featureId": "PRO_0000014673"
+    }
+  ],
+  "O35116": [
+    {
+      "type": "Chain",
+      "location": {
+        "start": { "value": 1, "modifier": "OUTSIDE" },
+        "end": { "value": 264, "modifier": "OUTSIDE" }
+      },
+      "description": "Catenin delta-2",
+      "featureId": "PRO_0000064301"
+    }
+  ],
+  "O43240": [
+    {
+      "type": "Disulfide bond",
+      "location": {
+        "start": { "value": null, "modifier": "UNKNOWN" },
+        "end": { "value": 263, "modifier": "EXACT" }
+      },
+      "description": "",
+      "evidences": [
+        { "evidenceCode": "ECO:0000255", "source": "PROSITE-ProRule", "id": "PRU00274" }
+      ]
+    }
+  ],
+  "O00533": [
+    {
+      "type": "Chain",
+      "location": {
+        "start": { "value": 25, "modifier": "EXACT" },
+        "end": { "value": null, "modifier": "UNKNOWN" }
+      },
+      "description": "Processed neural cell adhesion molecule L1-like protein",
+      "evidences": [{ "evidenceCode": "ECO:0000255" }],
+      "featureId": "PRO_0000314777"
+    }
+  ],
+  "P35573": [
+    {
+      "type": "Region",
+      "location": {
+        "start": { "value": 1, "modifier": "EXACT" },
+        "end": { "value": null, "modifier": "UNKNOWN" }
+      },
+      "description": "4-alpha-glucanotransferase"
+    },
+    {
+      "type": "Region",
+      "location": {
+        "start": { "value": null, "modifier": "UNKNOWN" },
+        "end": { "value": 1532, "modifier": "EXACT" }
+      },
+      "description": "Amylo-1,6-glucosidase"
+    }
+  ],
+  "O00139": [
+    {
+      "type": "Modified residue",
+      "location": {
+        "start": { "value": 556, "modifier": "EXACT" },
+        "end": { "value": 556, "modifier": "EXACT" },
+        "sequence": "O00139-4"
+      },
+      "description": "Phosphoserine",
+      "evidences": [{ "evidenceCode": "ECO:0000250", "source": "UniProtKB", "id": "P28740" }]
+    },
+    {
+      "type": "Modified residue",
+      "location": {
+        "start": { "value": 573, "modifier": "EXACT" },
+        "end": { "value": 573, "modifier": "EXACT" },
+        "sequence": "O00139-4"
+      },
+      "description": "Phosphoserine",
+      "evidences": [{ "evidenceCode": "ECO:0000250", "source": "UniProtKB", "id": "P28740" }]
+    }
+  ],
+  "A2RU49": [
+    {
+      "type": "Natural variant",
+      "location": {
+        "start": { "value": 165, "modifier": "EXACT" },
+        "end": { "value": 165, "modifier": "EXACT" },
+        "sequence": "A2RU49-2"
+      },
+      "description": "in dbSNP:4380026",
+      "evidences": [{ "evidenceCode": "ECO:0000305" }],
+      "featureId": "VAR_082892",
+      "alternativeSequence": { "originalSequence": "V", "alternativeSequences": ["I"] }
+    }
+  ],
+  "O15294": [
+    {
+      "type": "Mutagenesis",
+      "location": {
+        "start": { "value": 10, "modifier": "EXACT" },
+        "end": { "value": 10, "modifier": "EXACT" },
+        "sequence": "O15294-4"
+      },
+      "description": "Does not affect global auto-O-GlcNAcylation.",
+      "evidences": [{ "evidenceCode": "ECO:0000269", "source": "PubMed", "id": "31527085" }],
+      "alternativeSequence": { "originalSequence": "S", "alternativeSequences": ["A"] }
+    }
+  ],
+  "O70431": [
+    {
+      "type": "Transmembrane",
+      "location": {
+        "start": { "value": 1, "modifier": "OUTSIDE" },
+        "end": { "value": 21, "modifier": "EXACT" }
+      },
+      "description": "Helical; Name=2",
+      "evidences": [{ "evidenceCode": "ECO:0000250" }]
+    },
+    {
+      "type": "Transmembrane",
+      "location": {
+        "start": { "value": 232, "modifier": "EXACT" },
+        "end": { "value": 251, "modifier": "OUTSIDE" }
+      },
+      "description": "Helical; Name=7",
+      "evidences": [{ "evidenceCode": "ECO:0000250" }]
+    }
+  ],
+  "P05207": [
+    {
+      "type": "Binding site",
+      "location": {
+        "start": { "value": 82, "modifier": "EXACT" },
+        "end": { "value": 155, "modifier": "OUTSIDE" }
+      },
+      "description": "",
+      "featureCrossReferences": [{ "database": "ChEBI", "id": "CHEBI:58165" }],
+      "ligand": { "name": "3',5'-cyclic AMP", "id": "ChEBI:CHEBI:58165", "label": "1" }
+    }
+  ],
+  "Q16739": [
+    {
+      "type": "Motif",
+      "location": {
+        "start": { "value": 144, "modifier": "EXACT" },
+        "end": { "value": 144, "modifier": "EXACT" }
+      },
+      "description": "D2",
+      "evidences": [{ "evidenceCode": "ECO:0000305" }]
+    }
+  ]
+}

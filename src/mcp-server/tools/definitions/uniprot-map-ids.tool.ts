@@ -10,6 +10,8 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
+import { clampPageSize, countInput, PAGE_SIZE_CAP } from '@/mcp-server/tools/input-limits.js';
+import type { MappingIdentityGap } from '@/services/uniprot/types.js';
 import {
   describeInactiveInFull,
   ID_MAPPING_FROM_DBS,
@@ -17,6 +19,26 @@ import {
   JOB_ID_REGEX,
 } from '@/services/uniprot/types.js';
 import { getUniProtService } from '@/services/uniprot/uniprot-service.js';
+
+/** Mappings per results page when the caller sets no size: about 24 KB with identity and organism names. */
+const DEFAULT_PAGE_SIZE = 100;
+
+const FAILED_UPSTREAM =
+  'failed upstream (unavailable, rate-limited, or an HTML page instead of JSON)';
+
+/** The identity notice's second sentence: why this page carries no UniProtKB target identity. */
+const IDENTITY_GAP_CAUSES: Record<MappingIdentityGap, string> = {
+  no_target: "UniProt's job details name no target database, so identity was not requested.",
+  details_timeout:
+    "Reading the job's target database from UniProt's job details timed out, so identity was not requested.",
+  details_failed: `Reading the job's target database from UniProt's job details ${FAILED_UPSTREAM}, so identity was not requested.`,
+  details_refused:
+    "UniProt refused the job-details read that names the job's target database, so identity was not requested.",
+  identity_timeout: 'Reading target identity from UniProt timed out.',
+  identity_failed: `Reading target identity from UniProt ${FAILED_UPSTREAM}.`,
+  identity_refused:
+    'UniProt refused the target-identity read (it refuses one for any job above 100,000 mapped IDs).',
+};
 
 const MappingContinuationSchema = z
   .object({
@@ -28,7 +50,7 @@ const MappingContinuationSchema = z
 export const mapIds = tool('uniprot_map_ids', {
   title: 'uniprot-mcp-server: map IDs',
   description:
-    'Translate identifiers across databases via UniProt\'s ID-mapping service — gene names to accessions, accession to PDB / Ensembl / RefSeq / ChEMBL / GeneID, and back. The job runs asynchronously; this tool submits it and polls within a budget. A running job returns status "running" with a ticket; pass that ticket alone to poll the same job. A completed call returns status "finished" with one results page; when continuation is present, pass it alone to fetch the next completed page without re-submitting or polling the job. A gene name often maps to one reviewed Swiss-Prot accession plus dozens of unreviewed TrEMBL ones, so target UniProtKB-Swiss-Prot (reviewed only) for the usual intent, or UniProtKB to include TrEMBL. Pair a gene-symbol from_db with tax_id to disambiguate species. A row whose UniProtKB target is inactive (merged, demerged, or deleted) carries an inactive marker naming its replacements. Chain the resulting active accessions into uniprot_get_entry.',
+    'Translate identifiers across databases via UniProt\'s ID-mapping service — gene names to accessions, accession to PDB / Ensembl / RefSeq / ChEMBL / GeneID, and back. The job runs asynchronously; this tool submits it and polls within a budget. A running job returns status "running" with a ticket; pass that ticket, without submission inputs, to poll the same job for another budget. A completed call returns status "finished" with one results page of up to size mappings (default 100); when continuation is present, pass it, without submission inputs, to fetch the next page without re-submitting or polling the job. A gene name often maps to one reviewed Swiss-Prot accession plus dozens of unreviewed TrEMBL ones, so target UniProtKB-Swiss-Prot (reviewed only) for the usual intent, or UniProtKB to include TrEMBL. Pair a gene-symbol from_db with tax_id to disambiguate species. A row whose UniProtKB target is inactive (merged, demerged, or deleted) carries an inactive marker naming its replacements. Chain the resulting active accessions into uniprot_get_entry.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     from_db: z
@@ -67,11 +89,16 @@ export const mapIds = tool('uniprot_map_ids', {
       .min(1)
       .optional()
       .describe(
-        'Running-job ticket from a prior status "running" response. Pass it alone to poll that job; do not combine it with continuation or submission inputs.',
+        'Running-job ticket from a prior status "running" response. Pass it without continuation or submission inputs to poll that job for another budget; size may accompany it.',
       ),
     continuation: MappingContinuationSchema.optional().describe(
-      'Completed-page continuation from a prior status "finished" response. Pass it alone to fetch the next page without polling or re-submitting.',
+      'Completed-page continuation from a prior status "finished" response. Pass it without a ticket or submission inputs to fetch the next page without polling or re-submitting; size may accompany it.',
     ),
+    size: countInput(PAGE_SIZE_CAP, (clamped) =>
+      clamped
+        ? `Mappings per completed results page. Default ${DEFAULT_PAGE_SIZE}; a value above ${PAGE_SIZE_CAP}, UniProt's page maximum, returns ${PAGE_SIZE_CAP} and says so. Applies to the page this call returns, beside a submission, a ticket, or a continuation; a continuation resumes at the next mapping whatever size the previous page had.`
+        : `Mappings per completed results page, at most ${PAGE_SIZE_CAP}. Default ${DEFAULT_PAGE_SIZE}. Applies to the page this call returns, beside a submission, a ticket, or a continuation; a continuation resumes at the next mapping whatever size the previous page had.`,
+    ).optional(),
   }),
   output: z.object({
     status: z
@@ -141,10 +168,10 @@ export const mapIds = tool('uniprot_map_ids', {
       .string()
       .optional()
       .describe(
-        'Running-job ticket (present only when status is "running"). Pass it alone to poll the same job.',
+        'Running-job ticket (present only when status is "running"). Pass it back as ticket, without submission inputs, to poll the same job.',
       ),
     continuation: MappingContinuationSchema.optional().describe(
-      'Next completed-page continuation (finished jobs only). Pass it alone to fetch the next page; absent on the terminal page.',
+      'Next completed-page continuation (finished jobs only). Pass it back as continuation, without submission inputs, to fetch the next page; absent on the terminal page.',
     ),
   }),
   enrichment: {
@@ -166,7 +193,7 @@ export const mapIds = tool('uniprot_map_ids', {
       .string()
       .optional()
       .describe(
-        'Status guidance — e.g. that the job is still running, that no IDs mapped, that target identity is unavailable, or that inactive targets could not be marked on this page.',
+        'Status guidance — e.g. that the job is still running or its latest status check failed upstream, that size was above the 500-row page maximum, that no IDs mapped, why target identity is unavailable, or that inactive targets could not be marked on this page.',
       ),
   },
   enrichmentTrailer: {
@@ -185,13 +212,15 @@ export const mapIds = tool('uniprot_map_ids', {
       reason: 'missing_inputs',
       code: JsonRpcErrorCode.ValidationError,
       when: 'No complete submission, running-job ticket, or completed-page continuation was provided.',
-      recovery: 'Provide from_db, to_db, and ids; a ticket alone; or a continuation alone.',
+      recovery:
+        'Provide from_db, to_db, and ids; or a ticket; or a continuation. size may accompany any of them.',
     },
     {
       reason: 'conflicting_inputs',
       code: JsonRpcErrorCode.ValidationError,
       when: 'Submission inputs, a running-job ticket, or a completed-page continuation were combined.',
-      recovery: 'Provide exactly one mode: submission fields, ticket alone, or continuation alone.',
+      recovery:
+        'Provide exactly one mode: submission fields, a ticket, or a continuation; size is the one input every mode accepts.',
     },
     {
       reason: 'unsupported_db_pair',
@@ -241,13 +270,15 @@ export const mapIds = tool('uniprot_map_ids', {
     }
 
     const service = getUniProtService();
+    // size is the one input every mode shares; UniProt answers a size above its maximum with a 400.
+    const pageSize = clampPageSize(input.size ?? DEFAULT_PAGE_SIZE, 'uniprot_map_ids', ctx);
     let result: Awaited<ReturnType<typeof service.mapIds>>;
     let mode: 'start' | 'ticket' | 'continuation';
 
     if (input.ticket) {
       mode = 'ticket';
       try {
-        result = await service.resumeMapping(input.ticket, ctx);
+        result = await service.resumeMapping(input.ticket, pageSize.applied, ctx);
       } catch (err) {
         if (err instanceof McpError && err.code === JsonRpcErrorCode.NotFound) {
           throw ctx.fail(
@@ -260,7 +291,7 @@ export const mapIds = tool('uniprot_map_ids', {
     } else if (input.continuation) {
       mode = 'continuation';
       try {
-        result = await service.resumeMappingPage(input.continuation, ctx);
+        result = await service.resumeMappingPage(input.continuation, pageSize.applied, ctx);
       } catch (err) {
         if (ctx.signal.aborted) throw err;
         if (err instanceof McpError && err.code === JsonRpcErrorCode.InvalidParams) {
@@ -285,7 +316,14 @@ export const mapIds = tool('uniprot_map_ids', {
         throw ctx.fail('missing_inputs');
       }
       try {
-        result = await service.mapIds(input.from_db, input.to_db, input.ids, input.tax_id, ctx);
+        result = await service.mapIds(
+          input.from_db,
+          input.to_db,
+          input.ids,
+          input.tax_id,
+          pageSize.applied,
+          ctx,
+        );
       } catch (err) {
         if (err instanceof McpError && err.data?.reason === 'unsupported_db_pair') {
           throw ctx.fail(
@@ -298,14 +336,15 @@ export const mapIds = tool('uniprot_map_ids', {
     }
 
     if (result.status === 'running') {
-      const notice =
-        mode === 'ticket'
-          ? 'Mapping job is still running. Re-call with the same ticket shortly.'
-          : `Mapping job still running after the inline budget. Re-call with ticket "${result.ticket}" to poll it.`;
-      ctx.enrich.notice(notice);
+      ctx.enrich.notice(
+        result.statusCheckFailed
+          ? `The latest status check of this mapping job failed upstream, so it is reported as running and may have finished since. Re-call with ticket "${result.ticket}" to keep polling it.`
+          : `Mapping job still running after the inline budget. Re-call with ticket "${result.ticket}" to keep polling it.`,
+      );
       ctx.log.info('ID mapping exceeded inline budget', {
         ticket: result.ticket,
         mode,
+        ...(result.statusCheckFailed ? { statusCheckFailed: true } : {}),
         ...(input.from_db ? { from: input.from_db } : {}),
         ...(input.to_db ? { to: input.to_db } : {}),
       });
@@ -319,6 +358,7 @@ export const mapIds = tool('uniprot_map_ids', {
     });
     // ctx.enrich.notice is last-wins, so every notice that applies to the page goes out as one.
     const notices: string[] = [];
+    if (pageSize.notice) notices.push(pageSize.notice);
     if (result.results.length === 0) {
       notices.push(
         'Completed result page contains no mappings in the target database. Mapping tax_id matches an exact taxon node; use uniprot_get_taxonomy to resolve the strain taxon, or omit tax_id for a deliberately global job. Protein search taxonomy filters include descendants.',
@@ -326,7 +366,7 @@ export const mapIds = tool('uniprot_map_ids', {
     }
     if (result.identityUnavailable)
       notices.push(
-        'UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. Enrichment is unavailable for jobs above 100,000 mapped IDs.',
+        `UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. ${IDENTITY_GAP_CAUSES[result.identityUnavailable]}`,
       );
     if (result.inactiveUnchecked) {
       notices.push(
@@ -363,28 +403,38 @@ export const mapIds = tool('uniprot_map_ids', {
       const results = result.results ?? [];
       if (results.length === 0) {
         lines.push('No mappings resolved.');
+      } else if (
+        results.some(
+          (r) =>
+            r.entryName !== undefined ||
+            r.reviewed !== undefined ||
+            r.organism !== undefined ||
+            r.gene !== undefined,
+        )
+      ) {
+        // A page carrying UniProtKB identity gets one row per mapping, blank where a value is absent.
+        lines.push(
+          '',
+          '| From | To | Entry | Reviewed | Organism | Gene |',
+          '| --- | --- | --- | --- | --- | --- |',
+        );
+        for (const r of results) {
+          const organism = r.organism
+            ? `${r.organism.scientificName ? `${r.organism.scientificName} ` : ''}[taxon ${r.organism.taxonId}]`
+            : '';
+          lines.push(
+            `| ${r.from} | ${r.to} | ${r.entryName ?? ''} | ${r.reviewed ?? ''} | ${organism} | ${r.gene ?? ''} |`,
+          );
+        }
       } else {
         lines.push('', '| From | To |', '| --- | --- |');
         for (const r of results) lines.push(`| ${r.from} | ${r.to} |`);
-        for (const r of results) {
-          const identity = [
-            r.entryName,
-            r.reviewed === undefined ? undefined : `reviewed: ${r.reviewed}`,
-            r.organism
-              ? `taxon ${r.organism.taxonId}${r.organism.scientificName ? ` (${r.organism.scientificName})` : ''}`
-              : undefined,
-            r.gene ? `gene: ${r.gene}` : undefined,
-          ].filter((value) => value !== undefined);
-          if (identity.length) lines.push(`- ${r.from} → ${r.to}: ${identity.join('; ')}`);
-        }
-        const inactiveRows = results.filter((r) => r.inactive);
-        if (inactiveRows.length) {
-          lines.push('', '**Inactive targets** (no entry to fetch):');
-          for (const r of inactiveRows) {
-            lines.push(
-              `- ${r.from} → ${describeInactiveInFull({ accession: r.to, ...r.inactive })}`,
-            );
-          }
+      }
+      const inactiveRows = results.filter((r) => r.inactive);
+      if (inactiveRows.length) {
+        lines.push('', '**Inactive targets** (no entry to fetch):');
+        for (const r of inactiveRows) {
+          lines.push(`- ${r.from} → ${describeInactiveInFull({ accession: r.to, ...r.inactive })}`);
         }
       }
     }

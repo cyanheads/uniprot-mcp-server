@@ -28,7 +28,7 @@ const ServerConfigSchema = z.object({
     .positive()
     .default(8_000)
     .describe(
-      'Wall-clock budget for the inline ID-mapping poll loop before returning a resumable ticket. Should be less than timeoutMs.',
+      'Wall-clock budget for polling an ID-mapping job — a fresh submission and a ticket call alike — before returning a resumable ticket. Should be less than timeoutMs. The whole uniprot_map_ids call, results read included, ends within 50 seconds.',
     ),
   defaultPageSize: z.coerce
     .number()
@@ -43,7 +43,7 @@ const ServerConfigSchema = z.object({
     .stringbool()
     .default(true)
     .describe(
-      'Serve an over-the-cap size (search, proteome) at 500 with a notice, accept any section_limit, and accept up to 500 accessions on uniprot_get_entry, fetching the first 20 distinct and deferring the rest. False advertises and enforces the strict caps: size and section_limit at most 500, at most 20 accessions.',
+      'Serve an over-the-cap size (search, proteome, ID mapping) at 500 with a notice, accept any section_limit, and accept up to 500 accessions on uniprot_get_entry, fetching the first 20 distinct and deferring the rest. False advertises and enforces the strict caps: size and section_limit at most 500, at most 20 accessions.',
     ),
 });
 

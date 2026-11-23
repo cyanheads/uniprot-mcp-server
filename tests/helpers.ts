@@ -14,6 +14,8 @@
 
 import { McpError } from '@cyanheads/mcp-ts-core/errors';
 import { vi } from 'vitest';
+import featureLocations from './fixtures/feature-locations.json' with { type: 'json' };
+import residueCoverage from './fixtures/residue-coverage.json' with { type: 'json' };
 
 /**
  * Await a call that must reject, and return the thrown `Error`.
@@ -222,11 +224,147 @@ export function activeRawEntry(accession: string, entryName: string, length = 39
   };
 }
 
+// --- #46: feature locations ---
+
+/**
+ * Entry name and length for each accession in `fixtures/feature-locations.json`:
+ * feature rows captured from rest.uniprot.org (release 2026_04, 2026-11-23), each
+ * as UniProt sent it and cut to the rows used — bounds UniProt marks UNSURE,
+ * OUTSIDE, or UNKNOWN, and positions it numbers on an isoform.
+ */
+const FEATURE_LOCATION_ENTRIES = {
+  O75339: ['CILP1_HUMAN', 1184],
+  O35116: ['CTND2_RAT', 264],
+  O43240: ['KLK10_HUMAN', 276],
+  O00533: ['NCHL1_HUMAN', 1208],
+  P35573: ['GDE_HUMAN', 1532],
+  O00139: ['KIF2A_HUMAN', 706],
+  A2RU49: ['HYKK_HUMAN', 373],
+  O15294: ['OGT1_HUMAN', 1046],
+  O70431: ['ADRB2_MERUN', 251],
+  P05207: ['KAP2_PIG', 155],
+  Q16739: ['CEGT_HUMAN', 394],
+} as const satisfies Record<keyof typeof featureLocations, readonly [string, number]>;
+
+/** An accession captured in `fixtures/feature-locations.json`. */
+export type FeatureLocationAccession = keyof typeof featureLocations;
+
+/** An active entry row carrying one accession's captured feature rows. */
+export function featureLocationRow(accession: FeatureLocationAccession) {
+  const [entryName, length] = FEATURE_LOCATION_ENTRIES[accession];
+  return { ...activeRawEntry(accession, entryName, length), features: featureLocations[accession] };
+}
+
+// --- #48: residue coverage ---
+
+/**
+ * Entry name and length for each accession in `fixtures/residue-coverage.json`:
+ * position-bearing feature rows captured from rest.uniprot.org (release 2026_04,
+ * 2026-11-23), in UniProt order with evidences cut — each accession's rows of the
+ * sections a residue case reads. P04637 holds every row of its default record's
+ * sites, PTMs, processing, and domains as UniProt sent them (its four Binding site
+ * rows also without their `featureCrossReferences`), and its 1,363 natural variants
+ * written compactly as `[featureId, start, end, original, variation]` (every bound
+ * EXACT; descriptions cut).
+ */
+const RESIDUE_COVERAGE_ENTRIES = {
+  P04637: ['P53_HUMAN', 393],
+  O43240: ['KLK10_HUMAN', 276],
+  O75339: ['CILP1_HUMAN', 1184],
+  O00533: ['NCHL1_HUMAN', 1208],
+  O00139: ['KIF2A_HUMAN', 706],
+} as const satisfies Record<keyof typeof residueCoverage, readonly [string, number]>;
+
+/** An accession captured in `fixtures/residue-coverage.json`. */
+export type ResidueCoverageAccession = keyof typeof residueCoverage;
+
+/** An active entry row carrying one accession's captured position-bearing rows. */
+export function residueCoverageRow(accession: ResidueCoverageAccession) {
+  const [entryName, length] = RESIDUE_COVERAGE_ENTRIES[accession];
+  const rows = residueCoverage[accession];
+  const features = Array.isArray(rows)
+    ? rows
+    : [
+        ...rows.features,
+        ...rows.variants.map(([featureId, start, end, original, variation]) => ({
+          type: 'Natural variant',
+          location: {
+            start: { value: start, modifier: 'EXACT' },
+            end: { value: end, modifier: 'EXACT' },
+          },
+          featureId,
+          alternativeSequence: { originalSequence: original, alternativeSequences: [variation] },
+        })),
+      ];
+  return { ...activeRawEntry(accession, entryName, length), features };
+}
+
 const pubmed = (id: string) => ({ evidenceCode: 'ECO:0000269', source: 'PubMed', id });
 const exact = (start: number, end: number) => ({
   start: { value: start, modifier: 'EXACT' },
   end: { value: end, modifier: 'EXACT' },
 });
+
+// --- #47: a biophysicochemical part with two texts ---
+
+/**
+ * An active entry row whose one BIOPHYSICOCHEMICAL PROPERTIES comment carries two texts in
+ * each of its five text parts, each with its own evidence (the first kinetics note has none,
+ * as UniProt sent it). The captured comments send one text per part, so this one is assembled
+ * from texts rest.uniprot.org sent for other entries (release 2026_04, captured 2026-11-23):
+ * the kinetics notes of A9WGE2 and P09874, the pH texts of P55263 and A9WGE2, the temperature
+ * texts of O75503 and P14920, the redox potentials of Q96JJ7 and Q8N5K1, and Q9SYW8's
+ * absorption with its note beside B0F481's.
+ */
+export const TWO_TEXT_BIOPHYSICOCHEMICAL_ROW = {
+  ...activeRawEntry('P00000', 'TEST_HUMAN'),
+  comments: [
+    {
+      commentType: 'BIOPHYSICOCHEMICAL PROPERTIES',
+      kineticParameters: {
+        note: {
+          texts: [
+            {
+              value: 'kcat is 1.7 sec(-1) for lyase activity with (R)-citramalyl-CoA as substrate.',
+            },
+            { value: 'kcat is 390 sec(-1) for NAD(+).', evidences: [pubmed('7852410')] },
+          ],
+        },
+      },
+      phDependence: {
+        texts: [
+          { value: 'Optimum pH is 6.5.', evidences: [pubmed('6246102')] },
+          { value: 'Optimum pH is 7 (at 55 degrees Celsius).', evidences: [pubmed('17259315')] },
+        ],
+      },
+      temperatureDependence: {
+        texts: [
+          { value: 'Thermostable.', evidences: [pubmed('37708259')] },
+          { value: 'Optimum temperature is 45 degrees Celsius.', evidences: [pubmed('29326945')] },
+        ],
+      },
+      redoxPotential: {
+        texts: [
+          { value: 'E(0) is -157 mV.', evidences: [pubmed('15623505')] },
+          { value: 'E is 0 +/- 10 mV for 2Fe-2S at pH 7.5.', evidences: [pubmed('19580816')] },
+        ],
+      },
+      absorption: {
+        max: 695,
+        approximate: true,
+        note: {
+          texts: [
+            { value: 'Emission maxima at 702 nm.', evidences: [pubmed('11553743')] },
+            {
+              value: 'Shoulder at 335 nm (at pH 7.5 and 30 degrees Celsius).',
+              evidences: [pubmed('22547782')],
+            },
+          ],
+        },
+      },
+    },
+  ],
+};
 
 /**
  * Full curated UniProtKB rows as `rest.uniprot.org/uniprotkb/search` returned
@@ -568,11 +706,119 @@ export const RAW_ENTRIES = {
   },
 } as const;
 
+// --- #45: the molecule behind a hit's function snippet ---
+
+/**
+ * `/uniprotkb/search` rows under the default search projection (UniProt release
+ * 2026_04, captured 2026-11-23), cut to the identity fields and FUNCTION comments,
+ * each comment's text kept without its `evidences` array. P01275 and P00747 open
+ * with a FUNCTION comment UniProt qualifies with a `molecule`; P01275 keeps the
+ * first 2 of its 5 FUNCTION comments, and P00747 also keeps one of its later
+ * unqualified FUNCTION comments. P04637's first FUNCTION comment
+ * names no molecule. The P01275 second text and the P04637 text are cut after
+ * their first two sentences, P04637's evidence lists to two PubMed IDs each.
+ */
+export const RAW_SNIPPET_ROWS = {
+  P01275: {
+    entryType: 'UniProtKB reviewed (Swiss-Prot)',
+    primaryAccession: 'P01275',
+    uniProtkbId: 'GLUC_HUMAN',
+    annotationScore: 5.0,
+    organism: { scientificName: 'Homo sapiens', commonName: 'Human', taxonId: 9606 },
+    proteinExistence: '1: Evidence at protein level',
+    proteinDescription: {
+      recommendedName: { fullName: { value: 'Pro-glucagon' } },
+      flag: 'Precursor',
+    },
+    genes: [{ geneName: { value: 'GCG' } }],
+    comments: [
+      {
+        commentType: 'FUNCTION',
+        molecule: 'Glucagon',
+        texts: [
+          {
+            value:
+              'Plays a key role in glucose metabolism and homeostasis. Regulates blood glucose by increasing gluconeogenesis and decreasing glycolysis. A counterregulatory hormone of insulin, raises plasma glucose levels in response to insulin-induced hypoglycemia. Plays an important role in initiating and maintaining hyperglycemic conditions in diabetes. Binds to and activates the glucagon receptor GCGR, which couples to the G(s) G protein and elevates intracellular cAMP, triggering downstream metabolic responses (PubMed:32193322)',
+          },
+        ],
+      },
+      {
+        commentType: 'FUNCTION',
+        molecule: 'Glucagon-like peptide 1',
+        texts: [
+          {
+            value:
+              'Potent stimulator of glucose-dependent insulin release (PubMed:22037645, PubMed:40446798). Also stimulates insulin release in response to IL6 (PubMed:22037645).',
+          },
+        ],
+      },
+    ],
+    sequence: { length: 180 },
+  },
+  P00747: {
+    entryType: 'UniProtKB reviewed (Swiss-Prot)',
+    primaryAccession: 'P00747',
+    uniProtkbId: 'PLMN_HUMAN',
+    annotationScore: 5.0,
+    organism: { scientificName: 'Homo sapiens', commonName: 'Human', taxonId: 9606 },
+    proteinExistence: '1: Evidence at protein level',
+    proteinDescription: {
+      recommendedName: { fullName: { value: 'Plasminogen' } },
+      flag: 'Precursor',
+    },
+    genes: [{ geneName: { value: 'PLG' } }],
+    comments: [
+      {
+        commentType: 'FUNCTION',
+        molecule: 'Plasmin',
+        texts: [
+          {
+            value:
+              'Protease which primary function is to degrade fibrin, the main component of blood clots (PubMed:6094526, PubMed:6919539). Also cleaves other components of blood clots like thrombospondin-1/THBS1 and von Willebrand factor (VWF) (PubMed:24449821, PubMed:7679575). Can also directly and/or through the activation of other proteases degrade the various components of the extracellular matrix including collagen, fibronectin and laminin (PubMed:14699093, PubMed:28849762, PubMed:9171346). Thereby, regulates a variety of biological processes including embryonic development, tissue remodeling, and inflammation (PubMed:9171346). In ovulation, weakens the walls of the Graafian follicle (By similarity). In vitro, it is also able to cleave several complement zymogens, such as C1, C4 and C5 (PubMed:6447255)',
+          },
+        ],
+      },
+      {
+        commentType: 'FUNCTION',
+        texts: [
+          {
+            value:
+              '(Microbial infection) Binds to OspC on the surface of B.burgdorferi cells, possibly conferring an extracellular protease activity on the bacteria that allows it to traverse host tissue',
+          },
+        ],
+      },
+    ],
+    sequence: { length: 810 },
+  },
+  P04637: {
+    entryType: 'UniProtKB reviewed (Swiss-Prot)',
+    primaryAccession: 'P04637',
+    uniProtkbId: 'P53_HUMAN',
+    annotationScore: 5.0,
+    organism: { scientificName: 'Homo sapiens', commonName: 'Human', taxonId: 9606 },
+    proteinExistence: '1: Evidence at protein level',
+    proteinDescription: { recommendedName: { fullName: { value: 'Cellular tumor antigen p53' } } },
+    genes: [{ geneName: { value: 'TP53' }, synonyms: [{ value: 'P53' }] }],
+    comments: [
+      {
+        commentType: 'FUNCTION',
+        texts: [
+          {
+            value:
+              'Multifunctional transcription factor that induces cell cycle arrest, DNA repair or apoptosis upon binding to its target DNA sequence (PubMed:11025664, PubMed:12524540). Acts as a tumor suppressor in many tumor types; induces growth arrest or apoptosis depending on the physiological circumstances and cell type (PubMed:11025664, PubMed:12524540).',
+          },
+        ],
+      },
+    ],
+    sequence: { length: 393 },
+  },
+} as const;
+
 /**
  * The human reference proteome as `rest.uniprot.org/proteomes/search` returned
- * it (captured 2026-10-12), cut to the fields the service reads plus the
- * `description` and sibling `cpdReport` it ignores; the description is cut to
- * its first sentence.
+ * it (captured 2026-10-12), cut to the fields the service read then plus the
+ * `description` it ignores, so it carries no `geneCount` or
+ * `proteomeStatistics`; the description is cut to its first sentence.
  */
 export const RAW_HUMAN_PROTEOME = {
   id: 'UP000005640',
@@ -605,6 +851,165 @@ export const RAW_HUMAN_PROTEOME = {
     source: 'Ensembl',
   },
   proteinCount: 147520,
+} as const;
+
+// --- #49: proteome counts and exclusion reasons ---
+
+/**
+ * Proteome records as `rest.uniprot.org/proteomes/search` returned them on
+ * UniProt release 2026_04 (captured 2026-11-23), cut to the fields the service
+ * reads. UniProt computes the gene count and protein statistics for reference
+ * proteomes only: the non-reference and excluded records carry its 0
+ * placeholders beside a non-zero `proteinCount`. Only an excluded record carries
+ * `exclusionReasons`.
+ */
+export const RAW_PROTEOMES = {
+  human: {
+    id: 'UP000005640',
+    taxonomy: {
+      scientificName: 'Homo sapiens',
+      commonName: 'Human',
+      taxonId: 9606,
+      mnemonic: 'HUMAN',
+    },
+    proteomeType: 'Reference proteome',
+    proteinCount: 263886,
+    geneCount: 20652,
+    proteomeStatistics: {
+      reviewedProteinCount: 20414,
+      unreviewedProteinCount: 243472,
+      isoformProteinCount: 22131,
+    },
+    proteomeCompletenessReport: {
+      buscoReport: {
+        complete: 13716,
+        completeSingle: 5103,
+        completeDuplicated: 8613,
+        fragmented: 5,
+        missing: 59,
+        total: 13780,
+        lineageDb: 'primates_odb10',
+        score: 99,
+      },
+      cpdReport: {
+        proteomeCount: 85,
+        stdCdss: 0.0,
+        averageCdss: 0,
+        confidence: 0,
+        status: 'Outlier (high value)',
+      },
+    },
+    genomeAssembly: { assemblyId: 'GCA_000001405.29' },
+  },
+  ecoli: {
+    id: 'UP000000625',
+    taxonomy: {
+      scientificName: 'Escherichia coli (strain K12)',
+      taxonId: 83333,
+      mnemonic: 'ECOLI',
+    },
+    proteomeType: 'Reference proteome',
+    proteinCount: 4403,
+    geneCount: 4403,
+    proteomeStatistics: {
+      reviewedProteinCount: 4403,
+      unreviewedProteinCount: 0,
+      isoformProteinCount: 12,
+    },
+    proteomeCompletenessReport: {
+      buscoReport: {
+        complete: 440,
+        completeSingle: 436,
+        completeDuplicated: 4,
+        fragmented: 0,
+        missing: 0,
+        total: 440,
+        lineageDb: 'enterobacterales_odb10',
+        score: 100,
+      },
+      cpdReport: {
+        proteomeCount: 26943,
+        stdCdss: 0.0,
+        averageCdss: 0,
+        confidence: 0,
+        status: 'Close to standard (low value)',
+      },
+    },
+    genomeAssembly: { assemblyId: 'GCA_000005845.2' },
+  },
+  nonReference: {
+    id: 'UP000000318',
+    taxonomy: {
+      scientificName: 'Escherichia coli (strain K12)',
+      taxonId: 83333,
+      mnemonic: 'ECOLI',
+    },
+    proteomeType: 'Non Reference proteome',
+    proteinCount: 4227,
+    geneCount: 0,
+    proteomeStatistics: {
+      reviewedProteinCount: 0,
+      unreviewedProteinCount: 0,
+      isoformProteinCount: 0,
+    },
+    proteomeCompletenessReport: {
+      buscoReport: {
+        complete: 440,
+        completeSingle: 438,
+        completeDuplicated: 2,
+        fragmented: 0,
+        missing: 0,
+        total: 440,
+        lineageDb: 'enterobacterales_odb10',
+        score: 100,
+      },
+      cpdReport: {
+        proteomeCount: 26943,
+        stdCdss: 0.0,
+        averageCdss: 0,
+        confidence: 0,
+        status: 'Close to standard (low value)',
+      },
+    },
+    genomeAssembly: { assemblyId: 'GCA_000010245.1' },
+  },
+  excluded: {
+    id: 'UP000005626',
+    taxonomy: {
+      scientificName: 'Escherichia coli str. K-12 substr. MDS42',
+      taxonId: 1110693,
+      mnemonic: 'ECOLI',
+    },
+    proteomeType: 'Excluded',
+    proteinCount: 3547,
+    geneCount: 0,
+    proteomeStatistics: {
+      reviewedProteinCount: 0,
+      unreviewedProteinCount: 0,
+      isoformProteinCount: 0,
+    },
+    proteomeCompletenessReport: {
+      buscoReport: {
+        complete: 440,
+        completeSingle: 438,
+        completeDuplicated: 2,
+        fragmented: 0,
+        missing: 0,
+        total: 440,
+        lineageDb: 'enterobacterales_odb10',
+        score: 100,
+      },
+      cpdReport: {
+        proteomeCount: 26944,
+        stdCdss: 0.0,
+        averageCdss: 0,
+        confidence: 0,
+        status: 'Outlier (low value)',
+      },
+    },
+    genomeAssembly: { assemblyId: 'GCA_000350185.1' },
+    exclusionReasons: ['genome length too small'],
+  },
 } as const;
 
 /**

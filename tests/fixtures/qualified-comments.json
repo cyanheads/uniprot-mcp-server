@@ -1,0 +1,2837 @@
+{
+  "results": [
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P04637",
+      "uniProtkbId": "P53_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "value": "Cellular tumor antigen p53"
+          }
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "value": "TP53"
+          },
+          "synonyms": [
+            {
+              "value": "P53"
+            }
+          ]
+        }
+      ],
+      "comments": [
+        {
+          "commentType": "COFACTOR",
+          "cofactors": [
+            {
+              "name": "Zn(2+)",
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "14534297"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "16793544"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "17015838"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "18650397"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "19515728"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "20142040"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "20364130"
+                }
+              ],
+              "cofactorCrossReference": {
+                "database": "ChEBI",
+                "id": "CHEBI:29105"
+              }
+            }
+          ],
+          "note": {
+            "texts": [
+              {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "14534297"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "16793544"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "17015838"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "18650397"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "19515728"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "20142040"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "20364130"
+                  }
+                ],
+                "value": "Binds 1 zinc ion per subunit."
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "note": {
+            "texts": [
+              {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "12810724"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "22726440"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "24625977"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "27323408"
+                  }
+                ],
+                "value": "Recruited into PML bodies together with CHEK2 (PubMed:12810724). Translocates to mitochondria upon oxidative stress (PubMed:22726440). Translocates to mitochondria in response to mitomycin C treatment (PubMed:27323408). Competitive inhibition of TP53 interaction with HSPA9/MOT-2 by UBXN2A results in increased protein abundance and subsequent translocation of TP53 to the nucleus (PubMed:24625977)"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "15340061"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "17170702"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "19011621"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "19033443"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "21597459"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "22726440"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "22914926"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "24625977"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "26634371"
+                  }
+                ],
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "15340061"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "17170702"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "17591690"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "18206965"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "19011621"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "21597459"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "22914926"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "24625977"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "26634371"
+                  }
+                ],
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "11025664"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "12810724"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "36108750"
+                  }
+                ],
+                "value": "Nucleus, PML body",
+                "id": "SL-0465"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "17170702"
+                  }
+                ],
+                "value": "Endoplasmic reticulum",
+                "id": "SL-0095"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "22726440"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "25168243"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "27323408"
+                  }
+                ],
+                "value": "Mitochondrion matrix",
+                "id": "SL-0170"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "28842590"
+                  }
+                ],
+                "value": "Cytoplasm, cytoskeleton, microtubule organizing center, centrosome",
+                "id": "SL-0048"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 1",
+          "note": {
+            "texts": [
+              {
+                "value": "Predominantly nuclear but localizes to the cytoplasm when expressed with isoform 4"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23752197"
+                  }
+                ],
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            },
+            {
+              "location": {
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 2",
+          "note": {
+            "texts": [
+              {
+                "value": "Localized mainly in the nucleus with minor staining in the cytoplasm"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            },
+            {
+              "location": {
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 3",
+          "note": {
+            "texts": [
+              {
+                "value": "Localized in the nucleus in most cells but found in the cytoplasm in some cells"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            },
+            {
+              "location": {
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 4",
+          "note": {
+            "texts": [
+              {
+                "value": "Predominantly nuclear but translocates to the cytoplasm following cell stress"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            },
+            {
+              "location": {
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 7",
+          "note": {
+            "texts": [
+              {
+                "value": "Localized mainly in the nucleus with minor staining in the cytoplasm"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            },
+            {
+              "location": {
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 8",
+          "note": {
+            "texts": [
+              {
+                "value": "Localized in both nucleus and cytoplasm in most cells. In some cells, forms foci in the nucleus that are different from nucleoli"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            },
+            {
+              "location": {
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 9",
+          "subcellularLocations": [
+            {
+              "location": {
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "ALTERNATIVE PRODUCTS",
+          "events": ["Alternative promoter usage", "Alternative splicing"],
+          "isoforms": [
+            {
+              "name": {
+                "value": "1"
+              },
+              "synonyms": [
+                {
+                  "value": "p53"
+                },
+                {
+                  "value": "p53alpha"
+                }
+              ],
+              "isoformIds": ["P04637-1"],
+              "isoformSequenceStatus": "Displayed"
+            },
+            {
+              "name": {
+                "value": "2"
+              },
+              "synonyms": [
+                {
+                  "value": "I9RET"
+                },
+                {
+                  "value": "p53beta"
+                }
+              ],
+              "isoformIds": ["P04637-2"],
+              "sequenceIds": ["VSP_006535", "VSP_006536"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "3"
+              },
+              "synonyms": [
+                {
+                  "value": "p53gamma"
+                }
+              ],
+              "isoformIds": ["P04637-3"],
+              "sequenceIds": ["VSP_040560", "VSP_040561"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "4"
+              },
+              "synonyms": [
+                {
+                  "value": "Del40-p53"
+                },
+                {
+                  "value": "Del40-p53alpha"
+                },
+                {
+                  "value": "p47"
+                }
+              ],
+              "isoformIds": ["P04637-4"],
+              "sequenceIds": ["VSP_040832"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "5"
+              },
+              "synonyms": [
+                {
+                  "value": "Del40-p53beta"
+                }
+              ],
+              "isoformIds": ["P04637-5"],
+              "sequenceIds": ["VSP_040832", "VSP_006535", "VSP_006536"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "6"
+              },
+              "synonyms": [
+                {
+                  "value": "Del40-p53gamma"
+                }
+              ],
+              "isoformIds": ["P04637-6"],
+              "sequenceIds": ["VSP_040832", "VSP_040560", "VSP_040561"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "7"
+              },
+              "synonyms": [
+                {
+                  "value": "Del133-p53"
+                },
+                {
+                  "value": "Del133-p53alpha"
+                }
+              ],
+              "isoformIds": ["P04637-7"],
+              "sequenceIds": ["VSP_040833"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "8"
+              },
+              "synonyms": [
+                {
+                  "value": "Del133-p53beta"
+                }
+              ],
+              "isoformIds": ["P04637-8"],
+              "sequenceIds": ["VSP_040833", "VSP_006535", "VSP_006536"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "9"
+              },
+              "synonyms": [
+                {
+                  "value": "Del133-p53gamma"
+                }
+              ],
+              "isoformIds": ["P04637-9"],
+              "sequenceIds": ["VSP_040833", "VSP_040560", "VSP_040561"],
+              "isoformSequenceStatus": "Described"
+            }
+          ]
+        }
+      ],
+      "sequence": {
+        "length": 393
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI000002ED67"
+      }
+    },
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P68871",
+      "uniProtkbId": "HBB_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "value": "Hemoglobin subunit beta"
+          }
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "value": "HBB"
+          }
+        }
+      ],
+      "comments": [
+        {
+          "texts": [
+            {
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "28066926"
+                }
+              ],
+              "value": "Involved in oxygen transport from the lung to the various peripheral tissues"
+            }
+          ],
+          "commentType": "FUNCTION"
+        },
+        {
+          "texts": [
+            {
+              "value": "LVV-hemorphin-7 potentiates the activity of bradykinin, causing a decrease in blood pressure"
+            }
+          ],
+          "commentType": "FUNCTION"
+        },
+        {
+          "texts": [
+            {
+              "value": "Functions as an endogenous inhibitor of enkephalin-degrading enzymes such as DPP3, and as a selective antagonist of the P2RX3 receptor which is involved in pain signaling, these properties implicate it as a regulator of pain and inflammation"
+            }
+          ],
+          "commentType": "FUNCTION",
+          "molecule": "Spinorphin"
+        }
+      ],
+      "sequence": {
+        "length": 147
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI00000015C9"
+      }
+    },
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "O14975",
+      "uniProtkbId": "S27A2_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000305"
+              }
+            ],
+            "value": "Long-chain fatty acid transport protein 2"
+          }
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "value": "SLC27A2"
+          },
+          "synonyms": [
+            {
+              "value": "ACSVL1"
+            },
+            {
+              "value": "FACVL1"
+            },
+            {
+              "value": "FATP2"
+            },
+            {
+              "value": "VLACS"
+            }
+          ]
+        }
+      ],
+      "comments": [
+        {
+          "texts": [
+            {
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "10198260"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "10749848"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "11980911"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "20530735"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "22022213"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "24269233"
+                }
+              ],
+              "value": "Mediates the import of long-chain fatty acids (LCFA) into the cell by facilitating their transport across cell membranes, playing an important role in hepatic fatty acid uptake (PubMed:10198260, PubMed:10749848, PubMed:11980911, PubMed:20530735, PubMed:22022213, PubMed:24269233). Also functions as an acyl-CoA ligase catalyzing the ATP-dependent formation of fatty acyl-CoA using LCFA and very-long-chain fatty acids (VLCFA) as substrates, which prevents fatty acid efflux from cells and might drive more fatty acid uptake (PubMed:10198260, PubMed:10749848, PubMed:11980911, PubMed:20530735, PubMed:22022213, PubMed:24269233). Plays a pivotal role in regulating available LCFA substrates from exogenous sources in tissues undergoing high levels of beta-oxidation or triglyceride synthesis (PubMed:20530735). Can also activate branched-chain fatty acids such as phytanic acid and pristanic acid (PubMed:10198260). May contribute to the synthesis of sphingosine-1-phosphate (PubMed:24269233). Does not activate C24 bile acids, cholate and chenodeoxycholate (PubMed:11980911). In vitro, activates 3-alpha,7-alpha,12-alpha-trihydroxy-5-beta-cholestanate (THCA), the C27 precursor of cholic acid deriving from the de novo synthesis from cholesterol (PubMed:11980911). However, it is not critical for THCA activation and bile synthesis in vivo (PubMed:20530735)"
+            }
+          ],
+          "commentType": "FUNCTION"
+        },
+        {
+          "texts": [
+            {
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "10198260"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "21768100"
+                }
+              ],
+              "value": "Exhibits both long-chain fatty acids (LCFA) transport activity and acyl CoA synthetase towards very long-chain fatty acids (PubMed:10198260, PubMed:21768100). Shows a preference for generating CoA derivatives of n-3 fatty acids, which are preferentially trafficked into phosphatidylinositol (PubMed:21768100)"
+            }
+          ],
+          "commentType": "FUNCTION",
+          "molecule": "Isoform 1"
+        },
+        {
+          "texts": [
+            {
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "21768100"
+                }
+              ],
+              "value": "Exhibits long-chain fatty acids (LCFA) transport activity but lacks acyl CoA synthetase towards very long-chain fatty acids"
+            }
+          ],
+          "commentType": "FUNCTION",
+          "molecule": "Isoform 2"
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "a fatty acid(in) = a fatty acid(out)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:38879"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "20530735"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "21768100"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "22022213"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "right-to-left",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:38881"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "20530735"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "21768100"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "(9Z)-octadecenoate(out) = (9Z)-octadecenoate(in)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:33655"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "22022213"
+              }
+            ]
+          }
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 2",
+          "reaction": {
+            "name": "a fatty acid(in) = a fatty acid(out)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:38879"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "21768100"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "right-to-left",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:38881"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "21768100"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "a long-chain fatty acid + ATP + CoA = a long-chain fatty acyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:15421"
+              }
+            ],
+            "ecNumber": "6.2.1.3",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10198260"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10749848"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "11980911"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "22022213"
+              },
+              {
+                "evidenceCode": "ECO:0000305",
+                "source": "PubMed",
+                "id": "20530735"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:15422"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10198260"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10749848"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "11980911"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "20530735"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "22022213"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "(5Z,8Z,11Z,14Z)-eicosatetraenoate + ATP + CoA = (5Z,8Z,11Z,14Z)-eicosatetraenoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:19713"
+              }
+            ],
+            "ecNumber": "6.2.1.15",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000250",
+                "source": "UniProtKB",
+                "id": "O35488"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:19714"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000250",
+                  "source": "UniProtKB",
+                  "id": "O35488"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "hexadecanoate + ATP + CoA = hexadecanoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:30751"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10198260"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10749848"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "11980911"
+              },
+              {
+                "evidenceCode": "ECO:0000305",
+                "source": "PubMed",
+                "id": "20530735"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:30752"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10198260"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10749848"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "11980911"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "20530735"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "(9Z)-octadecenoate + ATP + CoA = (9Z)-octadecenoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:33607"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "22022213"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:33608"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "22022213"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "3,7,11,15-tetramethylhexadecanoate + ATP + CoA = phytanoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:21380"
+              }
+            ],
+            "ecNumber": "6.2.1.24",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10198260"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:21381"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10198260"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "(9Z,12Z,15Z)-octadecatrienoate + ATP + CoA = (9Z,12Z,15Z)-octadecatrienoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:44936"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "21768100"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:44937"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "21768100"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "2,6,10,14-tetramethylpentadecanoate + ATP + CoA = pristanoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:47264"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10198260"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:47265"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10198260"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "reaction": {
+            "name": "(E)-hexadec-2-enoate + ATP + CoA = (2E)-hexadecenoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:36139"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "24269233"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:36140"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "24269233"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "a very long-chain fatty acid + ATP + CoA = a very long-chain fatty acyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:54536"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10198260"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10749848"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "11980911"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "21768100"
+              },
+              {
+                "evidenceCode": "ECO:0000305",
+                "source": "PubMed",
+                "id": "20530735"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:54537"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10198260"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10749848"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "11980911"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "20530735"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "tetracosanoate + ATP + CoA = tetracosanoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:33639"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10198260"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "10749848"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "21768100"
+              },
+              {
+                "evidenceCode": "ECO:0000305",
+                "source": "PubMed",
+                "id": "20530735"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:33640"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10198260"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "10749848"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "20530735"
+                },
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "21768100"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "(4Z,7Z,10Z,13Z,16Z,19Z)-docosahexaenoate + ATP + CoA = (4Z,7Z,10Z,13Z,16Z,19Z)-docosahexaenoyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:44932"
+              }
+            ],
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "21768100"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:44933"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "21768100"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "molecule": "Isoform 1",
+          "reaction": {
+            "name": "(25R)-3alpha,7alpha,12alpha-trihydroxy-5beta-cholestan-26-oate + ATP + CoA = (25R)-3alpha,7alpha,12alpha-trihydroxy-5beta-cholestan-26-oyl-CoA + AMP + diphosphate",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:22976"
+              }
+            ],
+            "ecNumber": "6.2.1.7",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "11980911"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:22977"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000305",
+                  "source": "PubMed",
+                  "id": "11980911"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "sequence": {
+        "length": 620
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI000013D776"
+      }
+    },
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P19367",
+      "uniProtkbId": "HXK1_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000305"
+              }
+            ],
+            "value": "Hexokinase-1"
+          },
+          "ecNumbers": [
+            {
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "1637300"
+                }
+              ],
+              "value": "2.7.1.1"
+            }
+          ]
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000312",
+                "source": "HGNC",
+                "id": "HGNC:4922"
+              }
+            ],
+            "value": "HK1"
+          }
+        }
+      ],
+      "comments": [
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "reaction": {
+            "name": "a D-hexose + ATP = a D-hexose 6-phosphate + ADP + H(+)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:22740"
+              }
+            ],
+            "ecNumber": "2.7.1.1",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "1637300"
+              },
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "27374331"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:22741"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "1637300"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "27374331"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "reaction": {
+            "name": "D-fructose + ATP = D-fructose 6-phosphate + ADP + H(+)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:16125"
+              }
+            ],
+            "ecNumber": "2.7.1.1",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000250",
+                "source": "UniProtKB",
+                "id": "P05708"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:16126"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000250",
+                  "source": "UniProtKB",
+                  "id": "P05708"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "reaction": {
+            "name": "D-glucose + ATP = D-glucose 6-phosphate + ADP + H(+)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:17825"
+              }
+            ],
+            "ecNumber": "2.7.1.1",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000250",
+                "source": "UniProtKB",
+                "id": "P05708"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:17826"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000250",
+                  "source": "UniProtKB",
+                  "id": "P05708"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "reaction": {
+            "name": "D-mannose + ATP = D-mannose 6-phosphate + ADP + H(+)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:11028"
+              }
+            ],
+            "ecNumber": "2.7.1.1",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000250",
+                "source": "UniProtKB",
+                "id": "P05708"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:11029"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000250",
+                  "source": "UniProtKB",
+                  "id": "P05708"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "commentType": "CATALYTIC ACTIVITY",
+          "reaction": {
+            "name": "D-glucosamine + ATP = D-glucosamine 6-phosphate + ADP + H(+)",
+            "reactionCrossReferences": [
+              {
+                "database": "Rhea",
+                "id": "RHEA:10948"
+              }
+            ],
+            "ecNumber": "2.7.1.1",
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000269",
+                "source": "PubMed",
+                "id": "27374331"
+              }
+            ]
+          },
+          "physiologicalReactions": [
+            {
+              "directionType": "left-to-right",
+              "reactionCrossReference": {
+                "database": "Rhea",
+                "id": "RHEA:10949"
+              },
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "27374331"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "sequence": {
+        "length": 917
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI0000111BA5"
+      }
+    },
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P00751",
+      "uniProtkbId": "CFAB_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000303",
+                "source": "PubMed",
+                "id": "2249879"
+              }
+            ],
+            "value": "Complement factor B"
+          },
+          "ecNumbers": [
+            {
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "3638964"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "624565"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "6554279"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "6919543"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "9748277"
+                }
+              ],
+              "value": "3.4.21.47"
+            }
+          ]
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000312",
+                "source": "HGNC",
+                "id": "HGNC:1037"
+              }
+            ],
+            "value": "CFB"
+          },
+          "synonyms": [
+            {
+              "value": "BF"
+            },
+            {
+              "value": "BFD"
+            }
+          ]
+        }
+      ],
+      "comments": [
+        {
+          "commentType": "COFACTOR",
+          "molecule": "Complement factor B Bb",
+          "cofactors": [
+            {
+              "name": "Mg(2+)",
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "15068800"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "19503103"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "19574954"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "21205667"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "3638964"
+                }
+              ],
+              "cofactorCrossReference": {
+                "database": "ChEBI",
+                "id": "CHEBI:18420"
+              }
+            },
+            {
+              "name": "Mn(2+)",
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "15016353"
+                }
+              ],
+              "cofactorCrossReference": {
+                "database": "ChEBI",
+                "id": "CHEBI:29035"
+              }
+            }
+          ]
+        }
+      ],
+      "sequence": {
+        "length": 764
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI000000D7F8"
+      }
+    },
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "P00918",
+      "uniProtkbId": "CAH2_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "value": "Carbonic anhydrase 2"
+          },
+          "ecNumbers": [
+            {
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "12171926"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "15300855"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "1909891"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "1910042"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "4994926"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "7761440"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "7901850"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "9398308"
+                }
+              ],
+              "value": "4.2.1.1"
+            }
+          ]
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "value": "CA2"
+          }
+        }
+      ],
+      "comments": [
+        {
+          "commentType": "COFACTOR",
+          "cofactors": [
+            {
+              "name": "Zn(2+)",
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "11076507"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "12499545"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "1336460"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "1433293"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "1909891"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "19583303"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "3151019"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "3151020"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "7761440"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "7803386"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "7901850"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8218160"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8262987"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8331673"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8399159"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8431430"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8451242"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8482389"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8639494"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "8987974"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "9398308"
+                },
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "9865942"
+                }
+              ],
+              "cofactorCrossReference": {
+                "database": "ChEBI",
+                "id": "CHEBI:29105"
+              }
+            },
+            {
+              "name": "Co(2+)",
+              "evidences": [
+                {
+                  "evidenceCode": "ECO:0000269",
+                  "source": "PubMed",
+                  "id": "19583303"
+                }
+              ],
+              "cofactorCrossReference": {
+                "database": "ChEBI",
+                "id": "CHEBI:48828"
+              }
+            }
+          ],
+          "note": {
+            "texts": [
+              {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "19583303"
+                  }
+                ],
+                "value": "Zinc. Can also use cobalt(II) with lower efficiency, but not copper(II), nickel(II) and manganese(II)."
+              }
+            ]
+          }
+        }
+      ],
+      "sequence": {
+        "length": 260
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI0000110BA2"
+      }
+    },
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "O00165",
+      "uniProtkbId": "HAX1_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "value": "HCLS1-associated protein X-1"
+          }
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "value": "HAX1"
+          },
+          "synonyms": [
+            {
+              "value": "HS1BP1"
+            }
+          ]
+        }
+      ],
+      "comments": [
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "subcellularLocations": [
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "18971376"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "9058808"
+                  }
+                ],
+                "value": "Mitochondrion matrix",
+                "id": "SL-0170"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "18971376"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "9058808"
+                  }
+                ],
+                "value": "Endoplasmic reticulum",
+                "id": "SL-0095"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "9058808"
+                  }
+                ],
+                "value": "Nucleus membrane",
+                "id": "SL-0182"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000250",
+                    "source": "UniProtKB",
+                    "id": "O35387"
+                  }
+                ],
+                "value": "Cytoplasmic vesicle",
+                "id": "SL-0088"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "26997484"
+                  }
+                ],
+                "value": "Cytoplasm, cell cortex",
+                "id": "SL-0138"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "26997484"
+                  }
+                ],
+                "value": "Cell membrane",
+                "id": "SL-0039"
+              },
+              "topology": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "26997484"
+                  }
+                ],
+                "value": "Peripheral membrane protein",
+                "id": "SL-9903"
+              },
+              "orientation": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "26997484"
+                  }
+                ],
+                "value": "Cytoplasmic side",
+                "id": "SL-9910"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000250",
+                    "source": "UniProtKB",
+                    "id": "Q7TSE9"
+                  }
+                ],
+                "value": "Sarcoplasmic reticulum",
+                "id": "SL-0239"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Cytoplasm, P-body",
+                "id": "SL-0230"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 1",
+          "note": {
+            "texts": [
+              {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Predominantly cytoplasmic. Also detected in the nucleus when nuclear export is inhibited, and in response to cellular stress caused by arsenite (in vitro)"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  },
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "25298122"
+                  }
+                ],
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 3",
+          "note": {
+            "texts": [
+              {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Predominantly cytoplasmic. Also detected in the nucleus when nuclear export is inhibited (in vitro)"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 4",
+          "note": {
+            "texts": [
+              {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Shuttles between nucleus and cytoplasm"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            },
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Nucleus",
+                "id": "SL-0191"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "SUBCELLULAR LOCATION",
+          "molecule": "Isoform 5",
+          "note": {
+            "texts": [
+              {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Predominantly cytoplasmic"
+              }
+            ]
+          },
+          "subcellularLocations": [
+            {
+              "location": {
+                "evidences": [
+                  {
+                    "evidenceCode": "ECO:0000269",
+                    "source": "PubMed",
+                    "id": "23164465"
+                  }
+                ],
+                "value": "Cytoplasm",
+                "id": "SL-0086"
+              }
+            }
+          ]
+        },
+        {
+          "commentType": "ALTERNATIVE PRODUCTS",
+          "events": ["Alternative splicing"],
+          "isoforms": [
+            {
+              "name": {
+                "value": "1"
+              },
+              "isoformIds": ["O00165-1"],
+              "isoformSequenceStatus": "Displayed"
+            },
+            {
+              "name": {
+                "value": "2"
+              },
+              "isoformIds": ["O00165-2"],
+              "sequenceIds": ["VSP_038537"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "3"
+              },
+              "isoformIds": ["O00165-3"],
+              "sequenceIds": ["VSP_038536"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "4"
+              },
+              "isoformIds": ["O00165-4"],
+              "sequenceIds": ["VSP_038538", "VSP_038539"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "5"
+              },
+              "isoformIds": ["O00165-5"],
+              "sequenceIds": ["VSP_038543"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "6"
+              },
+              "isoformIds": ["O00165-6"],
+              "sequenceIds": ["VSP_038544", "VSP_038545"],
+              "isoformSequenceStatus": "Described"
+            }
+          ],
+          "note": {
+            "texts": [
+              {
+                "value": "Additional isoforms seem to exist."
+              }
+            ]
+          }
+        }
+      ],
+      "sequence": {
+        "length": 279
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI000012C0B6"
+      }
+    },
+    {
+      "entryType": "UniProtKB reviewed (Swiss-Prot)",
+      "primaryAccession": "B3KU38",
+      "uniProtkbId": "IQIP1_HUMAN",
+      "annotationScore": 5.0,
+      "organism": {
+        "scientificName": "Homo sapiens",
+        "commonName": "Human",
+        "taxonId": 9606,
+        "evidences": [
+          {
+            "evidenceCode": "ECO:0000312",
+            "source": "EMBL",
+            "id": "BAG53300.1"
+          }
+        ],
+        "lineage": [
+          "Eukaryota",
+          "Metazoa",
+          "Chordata",
+          "Craniata",
+          "Vertebrata",
+          "Euteleostomi",
+          "Mammalia",
+          "Eutheria",
+          "Euarchontoglires",
+          "Primates",
+          "Haplorrhini",
+          "Catarrhini",
+          "Hominidae",
+          "Homo"
+        ]
+      },
+      "proteinExistence": "1: Evidence at protein level",
+      "proteinDescription": {
+        "recommendedName": {
+          "fullName": {
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000312",
+                "source": "HGNC",
+                "id": "HGNC:38842"
+              }
+            ],
+            "value": "IQCJ-SCHIP1 readthrough transcript protein"
+          }
+        }
+      },
+      "genes": [
+        {
+          "geneName": {
+            "evidences": [
+              {
+                "evidenceCode": "ECO:0000312",
+                "source": "HGNC",
+                "id": "HGNC:38842"
+              }
+            ],
+            "value": "IQCJ-SCHIP1"
+          }
+        }
+      ],
+      "comments": [
+        {
+          "commentType": "ALTERNATIVE PRODUCTS",
+          "events": ["Alternative splicing"],
+          "isoforms": [
+            {
+              "name": {
+                "value": "IQCJ-SCHIP1-1"
+              },
+              "isoformIds": ["B3KU38-1"],
+              "isoformSequenceStatus": "Displayed"
+            },
+            {
+              "name": {
+                "value": "IQCJ-SCHIP1-2"
+              },
+              "isoformIds": ["B3KU38-2"],
+              "sequenceIds": ["VSP_059227"],
+              "isoformSequenceStatus": "Described"
+            },
+            {
+              "name": {
+                "value": "SCHIP1-1"
+              },
+              "synonyms": [
+                {
+                  "value": "SCHIP-1"
+                },
+                {
+                  "value": "SCHIP-1a"
+                }
+              ],
+              "isoformIds": ["P0DPB3-1", "Q9P0W5-1"],
+              "isoformSequenceStatus": "External"
+            },
+            {
+              "name": {
+                "value": "SCHIP1-2"
+              },
+              "synonyms": [
+                {
+                  "value": "SCHIP-1-D241/253"
+                }
+              ],
+              "isoformIds": ["P0DPB3-2", "Q9P0W5-2"],
+              "isoformSequenceStatus": "External"
+            },
+            {
+              "name": {
+                "value": "SCHIP1-3"
+              },
+              "synonyms": [
+                {
+                  "value": "SCHIP-1-D22/253"
+                }
+              ],
+              "isoformIds": ["P0DPB3-3", "Q9P0W5-3"],
+              "isoformSequenceStatus": "External"
+            },
+            {
+              "name": {
+                "value": "SCHIP1-4"
+              },
+              "isoformIds": ["P0DPB3-4", "Q9P0W5-4"],
+              "isoformSequenceStatus": "External"
+            },
+            {
+              "name": {
+                "value": "IQCJ-1"
+              },
+              "isoformIds": ["Q1A5X6-1"],
+              "isoformSequenceStatus": "External"
+            },
+            {
+              "name": {
+                "value": "IQCJ-2"
+              },
+              "isoformIds": ["Q1A5X6-2"],
+              "isoformSequenceStatus": "External"
+            },
+            {
+              "name": {
+                "value": "IQCJ-3"
+              },
+              "isoformIds": ["Q1A5X6-3"],
+              "isoformSequenceStatus": "External"
+            }
+          ]
+        }
+      ],
+      "sequence": {
+        "length": 563
+      },
+      "extraAttributes": {
+        "uniParcId": "UPI0000E5AA62"
+      }
+    }
+  ]
+}

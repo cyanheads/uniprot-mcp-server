@@ -1,8 +1,10 @@
 /**
- * @fileoverview uniprot_get_proteome — the reference proteome for an organism by
- *   UPID or taxon ID (exactly one). Returns metadata inline (protein count, BUSCO
- *   completeness, genome assembly) and, when include_proteins is set, an opt-in
- *   cursor-paginated, capped protein list with truncation disclosure.
+ * @fileoverview uniprot_get_proteome — a proteome by UPID, or an organism's
+ *   reference proteome by taxon ID (exactly one). Returns metadata inline (type
+ *   and any exclusion reasons, protein and gene counts, reviewed/unreviewed/isoform
+ *   counts, CPD status, BUSCO completeness, genome assembly) and, when
+ *   include_proteins is set, an opt-in cursor-paginated, capped protein list with
+ *   truncation disclosure.
  * @module mcp-server/tools/definitions/uniprot-get-proteome
  */
 
@@ -10,6 +12,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { activeServerConfig, getServerConfig } from '@/config/server-config.js';
 import { clampPageSize, countInput, PAGE_SIZE_CAP } from '@/mcp-server/tools/input-limits.js';
+import { lengthLabel, moleculeLabel } from '@/mcp-server/tools/protein-format.js';
 import { proteomeQuery } from '@/services/uniprot/proteome-query.js';
 import { queryCursor } from '@/services/uniprot/query-cursor.js';
 import type { ProteomeProteinPage } from '@/services/uniprot/types.js';
@@ -36,6 +39,12 @@ const ProteinHitSchema = z
       })
       .describe('Source organism.'),
     length: z.number().describe('Canonical sequence length in residues.'),
+    sequenceFlags: z
+      .array(z.string().describe('One flag, as UniProt words it.'))
+      .optional()
+      .describe(
+        'UniProt\'s sequence flags: "Fragment" or "Fragments" (several non-adjacent pieces) when the sequence is incomplete, so length counts only the residues UniProt holds, not the whole protein; "Precursor" when the sequence is processed into a shorter mature form (signal, propeptide, transit peptide, or initiator methionine cleaved). Omitted when UniProt flags none.',
+      ),
     reviewed: z.boolean().describe('True for reviewed Swiss-Prot, false for unreviewed TrEMBL.'),
     annotationScore: z.number().describe('Annotation confidence on a 1–5 scale.'),
     proteinExistence: z.string().describe('Protein-existence evidence level.'),
@@ -45,13 +54,19 @@ const ProteinHitSchema = z
       .describe(
         'Opening of the first FUNCTION annotation, evidence references stripped: whole sentences within 250 characters (at least the first; one over 400 is cut at a word and ends with …). The complete annotation with evidence is uniprot_get_entry function. Omitted when none.',
       ),
+    functionSnippetMolecule: z
+      .string()
+      .optional()
+      .describe(
+        'The isoform, chain, or peptide the functionSnippet annotation is about, as UniProt names it, e.g. "Glucagon" or "Isoform 2". Omitted when UniProt names none, so the snippet is about the protein the row describes, and whenever functionSnippet is.',
+      ),
   })
   .describe('A protein in the proteome.');
 
 export const getProteome = tool('uniprot_get_proteome', {
   title: 'uniprot-mcp-server: get proteome',
   description:
-    'Fetch the reference proteome for an organism by UPID (e.g. "UP000005640") or NCBI taxon ID (e.g. 9606) — provide exactly one. Returns metadata inline: proteome type, total protein count, BUSCO completeness (score, complete/fragmented/missing counts, lineage dataset), and the genome assembly accession. The protein set is opt-in via include_proteins (it is large — human is ~147,506) and returns a capped page with a forward cursor; narrow it with the query filter (UniProtKB Lucene syntax) for a subset. Resolve an organism name to a taxon ID first with uniprot_get_taxonomy.',
+    'Fetch a proteome by UPID (e.g. "UP000005640"), which can name a reference, non-reference, or excluded proteome, or the reference proteome for an organism by NCBI taxon ID (e.g. 9606) — provide exactly one. Returns metadata inline: proteome type (with UniProt\'s reasons when excluded), total protein count, gene count, reviewed, unreviewed, and additional isoform protein counts, Complete Proteome Detector (CPD) status, BUSCO completeness (score, complete/fragmented/missing counts, lineage dataset), and the genome assembly accession. UniProt computes the gene count and the reviewed, unreviewed, and isoform counts for reference proteomes only, so they are omitted elsewhere. The protein set is opt-in via include_proteins (it is large) and returns a capped page with a forward cursor; narrow it with the query filter (UniProtKB Lucene syntax) for a subset. Resolve an organism name to a taxon ID first with uniprot_get_taxonomy.',
   annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   input: z.object({
     upid: z
@@ -104,7 +119,17 @@ export const getProteome = tool('uniprot_get_proteome', {
     proteome: z
       .object({
         upid: z.string().describe('Proteome identifier, e.g. "UP000005640".'),
-        proteomeType: z.string().describe('Proteome type, e.g. "Reference proteome".'),
+        proteomeType: z
+          .string()
+          .describe(
+            'Proteome type as UniProt words it, e.g. "Reference proteome", "Non Reference proteome", or "Excluded".',
+          ),
+        exclusionReasons: z
+          .array(z.string().describe('One reason, as UniProt words it.'))
+          .optional()
+          .describe(
+            'Why UniProt excluded the proteome, e.g. ["genome length too small"] or ["contaminated"]. Present on excluded proteomes only.',
+          ),
         organism: z
           .object({
             scientificName: z.string().describe('Organism scientific name.'),
@@ -117,6 +142,36 @@ export const getProteome = tool('uniprot_get_proteome', {
           })
           .describe('Source organism.'),
         proteinCount: z.number().describe('Total number of proteins in the proteome.'),
+        geneCount: z
+          .number()
+          .optional()
+          .describe(
+            'Number of genes the proteins come from — at most proteinCount, below it where genes have several protein entries. Omitted where UniProt has not computed it (it reports 0 on non-reference and excluded proteomes).',
+          ),
+        reviewedProteinCount: z
+          .number()
+          .optional()
+          .describe(
+            'Reviewed (Swiss-Prot) proteins; with unreviewedProteinCount it sums to proteinCount. Omitted, with the unreviewed and isoform counts, where UniProt has not computed them (it reports 0 for all three on non-reference and excluded proteomes).',
+          ),
+        unreviewedProteinCount: z
+          .number()
+          .optional()
+          .describe(
+            'Unreviewed (TrEMBL) proteins; 0 when every protein is reviewed. Omitted together with reviewedProteinCount.',
+          ),
+        isoformProteinCount: z
+          .number()
+          .optional()
+          .describe(
+            'Additional isoform sequences, counted outside proteinCount. Omitted together with reviewedProteinCount.',
+          ),
+        cpdStatus: z
+          .string()
+          .optional()
+          .describe(
+            'Complete Proteome Detector (CPD) status — where proteinCount falls among at least 30 closely related proteomes, as UniProt words it: "Standard", "Close to standard (high value)", "Close to standard (low value)", "Outlier (high value)", "Outlier (low value)", or "Unknown" (too few related proteomes to score). Omitted when UniProt sends none.',
+          ),
         busco: z
           .object({
             complete: z.number().describe('Complete BUSCO genes.'),
@@ -197,9 +252,9 @@ export const getProteome = tool('uniprot_get_proteome', {
     {
       reason: 'not_found',
       code: JsonRpcErrorCode.NotFound,
-      when: 'The UPID or taxon has no reference proteome.',
+      when: 'No proteome has the UPID, or the taxon has no reference proteome.',
       recovery:
-        'Confirm the organism has a reference proteome, or look it up with uniprot_get_taxonomy.',
+        'Check the UPID. For a taxon ID with no reference proteome, re-call with a parent taxon ID from its uniprot_get_taxonomy lineage to list the reference proteomes of related organisms.',
     },
     {
       reason: 'invalid_query',
@@ -315,14 +370,29 @@ export const getProteome = tool('uniprot_get_proteome', {
     const p = result.proteome;
     const lines = [
       `# ${p.organism.scientificName}${p.organism.commonName ? ` (${p.organism.commonName})` : ''} — ${p.upid}`,
-      `**Type:** ${p.proteomeType} · **Proteins:** ${p.proteinCount} · **Taxon:** ${p.organism.taxonId}${p.organism.mnemonic ? ` (${p.organism.mnemonic})` : ''}`,
+      `**Type:** ${p.proteomeType}${p.exclusionReasons?.length ? ` (${p.exclusionReasons.join('; ')})` : ''} · **Proteins:** ${p.proteinCount} · **Taxon:** ${p.organism.taxonId}${p.organism.mnemonic ? ` (${p.organism.mnemonic})` : ''}`,
     ];
+    // Each count renders on its own: a real 0 (E. coli's unreviewed count) shows as 0.
+    const counts = [
+      p.geneCount != null ? `**Genes:** ${p.geneCount}` : undefined,
+      p.reviewedProteinCount != null
+        ? `**Reviewed proteins:** ${p.reviewedProteinCount}`
+        : undefined,
+      p.unreviewedProteinCount != null
+        ? `**Unreviewed proteins:** ${p.unreviewedProteinCount}`
+        : undefined,
+      p.isoformProteinCount != null
+        ? `**Additional isoforms:** ${p.isoformProteinCount}`
+        : undefined,
+    ].filter((part) => part !== undefined);
+    if (counts.length) lines.push(counts.join(' · '));
     if (p.genomeAssembly) lines.push(`**Genome assembly:** ${p.genomeAssembly}`);
     if (p.busco) {
       lines.push(
         `**BUSCO:** ${p.busco.score != null ? `${p.busco.score}% complete` : 'completeness'} (${p.busco.lineageDb ?? 'lineage n/a'}) — complete ${p.busco.complete} (single ${p.busco.completeSingle}, duplicated ${p.busco.completeDuplicated}), fragmented ${p.busco.fragmented}, missing ${p.busco.missing} of ${p.busco.total}`,
       );
     }
+    if (p.cpdStatus) lines.push(`**CPD status:** ${p.cpdStatus}`);
     if (result.proteins?.length) {
       lines.push('', `## Proteins (${result.proteins.length} shown)`);
       for (const hit of result.proteins) {
@@ -330,9 +400,11 @@ export const getProteome = tool('uniprot_get_proteome', {
           `- **${hit.accession}** (${hit.entryName}) ${hit.proteinName ?? ''}${hit.geneNames.length ? ` [${hit.geneNames.join(', ')}]` : ''}`,
         );
         lines.push(
-          `  ${hit.reviewed ? 'reviewed' : 'unreviewed'} · score ${hit.annotationScore}/5 · ${hit.length} aa · ${hit.proteinExistence} · ${hit.organism.scientificName}${hit.organism.commonName ? ` (${hit.organism.commonName})` : ''} [taxon ${hit.organism.taxonId}]`,
+          `  ${hit.reviewed ? 'reviewed' : 'unreviewed'} · score ${hit.annotationScore}/5 · ${lengthLabel(hit.length, hit.sequenceFlags)} · ${hit.proteinExistence} · ${hit.organism.scientificName}${hit.organism.commonName ? ` (${hit.organism.commonName})` : ''} [taxon ${hit.organism.taxonId}]`,
         );
-        if (hit.functionSnippet) lines.push(`  ${hit.functionSnippet}`);
+        // A molecule comes only with a snippet; it leads the text, as on uniprot_get_entry function rows.
+        if (hit.functionSnippet)
+          lines.push(`  ${moleculeLabel(hit.functionSnippetMolecule)}${hit.functionSnippet}`);
       }
     }
     return [{ type: 'text', text: lines.join('\n') }];

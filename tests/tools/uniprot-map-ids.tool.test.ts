@@ -11,6 +11,7 @@
 import { JsonRpcErrorCode, McpError } from '@cyanheads/mcp-ts-core/errors';
 import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { getServerConfig } from '@/config/server-config.js';
 import type { IdMappingResult } from '@/services/uniprot/types.js';
 import {
   contentText,
@@ -145,6 +146,7 @@ describe('mapIds validation', () => {
       'UniProtKB',
       ['P04637'],
       undefined,
+      100,
       expect.anything(),
     );
     // The descriptions name UniProtKB, not UniProtKB_AC-ID, as the TrEMBL-inclusive target.
@@ -199,6 +201,7 @@ describe('mapIds start path', () => {
       'UniProtKB-Swiss-Prot',
       ['TP53', 'NOSUCHGENE'],
       9606,
+      100,
       ctx,
     );
     expect(result.status).toBe('finished');
@@ -389,6 +392,83 @@ describe('mapIds start path', () => {
   });
 });
 
+describe('mapIds size (#50)', () => {
+  const finished = {
+    status: 'finished',
+    results: [{ from: 'TP53', to: 'P04637' }],
+    failedIds: [],
+  } satisfies IdMappingResult;
+  const CLAMP_NOTICE =
+    "size 501 is above UniProt's page maximum of 500, so this page was requested at size 500.";
+
+  afterEach(() => {
+    getServerConfig().clampLimits = true;
+  });
+
+  it('passes size to the service beside a submission, a ticket, and a continuation', async () => {
+    for (const mock of [mapIdsMock, resumeMappingMock, resumeMappingPageMock])
+      mock.mockResolvedValue(finished);
+    const continuation = { jobId: 'job-1', cursor: 'c1' };
+    const submission = await runToolContract(mapIds, {
+      from_db: 'Gene_Name',
+      to_db: 'UniProtKB',
+      ids: ['TP53'],
+      size: 3,
+    });
+    const ticket = await runToolContract(mapIds, { ticket: 'job-1', size: 7 });
+    const page = await runToolContract(mapIds, { continuation, size: 250 });
+    for (const result of [submission, ticket, page]) expect(result.isError).toBeFalsy();
+    expect(mapIdsMock).toHaveBeenCalledWith(
+      'Gene_Name',
+      'UniProtKB',
+      ['TP53'],
+      undefined,
+      3,
+      expect.anything(),
+    );
+    expect(resumeMappingMock).toHaveBeenCalledWith('job-1', 7, expect.anything());
+    expect(resumeMappingPageMock).toHaveBeenCalledWith(continuation, 250, expect.anything());
+  });
+
+  it('requests a size above 500 at 500 and says so on both surfaces', async () => {
+    resumeMappingPageMock.mockResolvedValue(finished);
+    const continuation = { jobId: 'job-1', cursor: 'c1' };
+    const result = await runToolContract(mapIds, { continuation, size: 501 });
+    expect(resumeMappingPageMock).toHaveBeenCalledWith(continuation, 500, expect.anything());
+    expect((result.structuredContent as { notice?: string }).notice).toBe(CLAMP_NOTICE);
+    expect(contentText(result)).toContain(CLAMP_NOTICE);
+  });
+
+  it('polls a ticket at 500 for a size above it, disclosing the clamp on the finished page', async () => {
+    resumeMappingMock.mockResolvedValue(finished);
+    const result = await runToolContract(mapIds, { ticket: 'job-1', size: 501 });
+    expect(result.isError).toBeFalsy();
+    expect(resumeMappingMock).toHaveBeenCalledWith('job-1', 500, expect.anything());
+    expect((result.structuredContent as { notice?: string }).notice).toBe(CLAMP_NOTICE);
+    expect(contentText(result)).toContain(CLAMP_NOTICE);
+  });
+
+  it('keeps the running notice to the poll guidance, with no page to disclose a size for', async () => {
+    resumeMappingMock.mockResolvedValue({ status: 'running', ticket: 'job-1' });
+    const result = await runToolContract(mapIds, { ticket: 'job-1', size: 501 });
+    expect(resumeMappingMock).toHaveBeenCalledWith('job-1', 500, expect.anything());
+    expect((result.structuredContent as { notice?: string }).notice).toBe(
+      'Mapping job still running after the inline budget. Re-call with ticket "job-1" to keep polling it.',
+    );
+  });
+
+  it('rejects a size above 500 at the schema under UNIPROT_CLAMP_LIMITS=false, before any service call', async () => {
+    getServerConfig().clampLimits = false;
+    const result = await runToolContract(mapIds, { ticket: 'job-1', size: 501 });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_arguments' });
+    expect(resumeMappingMock).not.toHaveBeenCalled();
+    expect(mapIds.input.parse({ ticket: 'job-1', size: 500 })).toEqual({
+      ticket: 'job-1',
+      size: 500,
+    });
+  });
+});
+
 describe('mapIds inactive targets (real service, through runToolContract)', () => {
   /**
    * A finished UniProtKB-target job, shaped as rest.uniprot.org answers it (probed
@@ -470,9 +550,9 @@ describe('mapIds inactive targets (real service, through runToolContract)', () =
     expect(result.isError).toBeFalsy();
     const out = result.structuredContent as { results: object[]; notice?: string };
     expect(out.results).toEqual([{ from: 'Q9ZZZ9', to: 'Q9ZZZ9' }]);
-    // The same 404 also fails the identity read, so both disclosures apply to the page.
+    // The same 404 also refuses the identity read, so both disclosures apply to the page.
     expect(out.notice).toBe(
-      'UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. Enrichment is unavailable for jobs above 100,000 mapped IDs. UniProt reports 1 inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.',
+      'UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. UniProt refused the target-identity read (it refuses one for any job above 100,000 mapped IDs). UniProt reports 1 inactive (merged, demerged, or deleted) target accession(s) in this job, but they could not be identified on this page. Retry the call to mark them, or check a target with uniprot_get_entry.',
     );
     expect(contentText(result)).toContain('could not be identified');
   });
@@ -538,9 +618,9 @@ describe('mapIds inactive targets (real service, through runToolContract)', () =
       const reread = requestedUrls(fetchStub).at(-1);
       expect(reread?.pathname).toBe('/idmapping/uniprotkb/results/job-inactive');
       expect(reread?.searchParams.get('fields')).toBe(
-        'accession,id,reviewed,organism_id,gene_primary',
+        'accession,id,reviewed,organism_id,organism_name,gene_primary',
       );
-      expect(reread?.searchParams.get('size')).toBe('500');
+      expect(reread?.searchParams.get('size')).toBe('100');
     },
   );
 });
@@ -556,7 +636,7 @@ describe('mapIds resume path', () => {
     const input = mapIds.input.parse({ ticket: 'job-123' });
 
     const result = await mapIds.handler(input, ctx);
-    expect(resumeMappingMock).toHaveBeenCalledWith('job-123', ctx);
+    expect(resumeMappingMock).toHaveBeenCalledWith('job-123', 100, ctx);
     expect(mapIdsMock).not.toHaveBeenCalled();
     expect(result.status).toBe('finished');
     expect(getEnrichment(ctx)).toMatchObject({
@@ -716,7 +796,7 @@ describe('mapIds completed-page continuation', () => {
     const continuation = { jobId: 'job-pages', cursor: 'cursor-2' };
 
     const contract = await runToolContract(mapIds, { continuation });
-    expect(resumeMappingPageMock).toHaveBeenCalledWith(continuation, expect.anything());
+    expect(resumeMappingPageMock).toHaveBeenCalledWith(continuation, 100, expect.anything());
     expect(resumeMappingMock).not.toHaveBeenCalled();
     expect(mapIdsMock).not.toHaveBeenCalled();
     expect(contract).toMatchObject({
@@ -754,12 +834,16 @@ describe('mapIds completed-page continuation', () => {
   it.each([
     [
       'an empty page without target identity',
-      { results: [], identityUnavailable: true },
+      { results: [], identityUnavailable: 'no_target' as const },
       ['contains no mappings', 'exact taxon node', 'identity is unavailable'],
     ],
     [
       'unidentified inactive targets without target identity',
-      { results: [{ from: 'x', to: 'P04637' }], identityUnavailable: true, inactiveUnchecked: 2 },
+      {
+        results: [{ from: 'x', to: 'P04637' }],
+        identityUnavailable: 'identity_refused' as const,
+        inactiveUnchecked: 2,
+      },
       ['identity is unavailable', '100,000 mapped IDs', '2 inactive', 'could not be identified'],
     ],
   ])('keeps every notice for %s on both surfaces', async (_case, page, fragments) => {
@@ -777,6 +861,44 @@ describe('mapIds completed-page continuation', () => {
       expect(notice).toContain(fragment);
       expect(contentText(result)).toContain(fragment);
     }
+  });
+
+  it.each([
+    ['no_target', "UniProt's job details name no target database, so identity was not requested."],
+    [
+      'details_timeout',
+      "Reading the job's target database from UniProt's job details timed out, so identity was not requested.",
+    ],
+    [
+      'details_failed',
+      "Reading the job's target database from UniProt's job details failed upstream (unavailable, rate-limited, or an HTML page instead of JSON), so identity was not requested.",
+    ],
+    [
+      'details_refused',
+      "UniProt refused the job-details read that names the job's target database, so identity was not requested.",
+    ],
+    ['identity_timeout', 'Reading target identity from UniProt timed out.'],
+    [
+      'identity_failed',
+      'Reading target identity from UniProt failed upstream (unavailable, rate-limited, or an HTML page instead of JSON).',
+    ],
+    [
+      'identity_refused',
+      'UniProt refused the target-identity read (it refuses one for any job above 100,000 mapped IDs).',
+    ],
+  ] as const)('states the %s cause of missing identity on both surfaces', async (gap, cause) => {
+    resumeMappingPageMock.mockResolvedValue({
+      status: 'finished',
+      results: [{ from: 'x', to: 'P04637' }],
+      failedIds: [],
+      identityUnavailable: gap,
+    } satisfies IdMappingResult);
+    const result = await runToolContract(mapIds, {
+      continuation: { jobId: 'job-pages', cursor: 'c' },
+    });
+    const notice = `UniProtKB target identity is unavailable for this page; generic source-to-target mappings remain usable. ${cause}`;
+    expect((result.structuredContent as { notice?: string }).notice).toBe(notice);
+    expect(contentText(result)).toContain(notice);
   });
 
   it('maps an unknown or expired completed-page continuation to invalid_continuation', async () => {
@@ -942,5 +1064,59 @@ describe('mapIds format', () => {
     expect(text).toContain('- Q9ZZZ9 → Q9ZZZ9 was deleted from UniProtKB.');
     expect(text).toContain('- GENE2 → Q00002 is inactive in UniProtKB.');
     expect(text).not.toContain('- P04637 →');
+  });
+
+  it('format() renders a page carrying UniProtKB identity as one row per mapping, blank where absent', () => {
+    const blocks = mapIds.format!({
+      status: 'finished',
+      results: [
+        {
+          from: 'TP53',
+          to: 'P04637',
+          entryName: 'P53_HUMAN',
+          reviewed: true,
+          organism: { taxonId: 9606, scientificName: 'Homo sapiens' },
+          gene: 'TP53',
+        },
+        { from: 'TP53', to: 'Q00001', reviewed: false, organism: { taxonId: 10090 } },
+        { from: 'Q9ZZZ9', to: 'Q9ZZZ9', inactive: { reason: 'DELETED' } },
+      ],
+      continuation: { jobId: 'job-pages', cursor: 'cursor-2' },
+    });
+    expect(blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n')).toBe(
+      [
+        '**Status:** finished',
+        '**Next page:** re-call with continuation {"jobId":"job-pages","cursor":"cursor-2"}',
+        '',
+        '| From | To | Entry | Reviewed | Organism | Gene |',
+        '| --- | --- | --- | --- | --- | --- |',
+        '| TP53 | P04637 | P53_HUMAN | true | Homo sapiens [taxon 9606] | TP53 |',
+        '| TP53 | Q00001 |  | false | [taxon 10090] |  |',
+        '| Q9ZZZ9 | Q9ZZZ9 |  |  |  |  |',
+        '',
+        '**Inactive targets** (no entry to fetch):',
+        '- Q9ZZZ9 → Q9ZZZ9 was deleted from UniProtKB.',
+      ].join('\n'),
+    );
+  });
+
+  it('format() keeps the From/To table for a page without UniProtKB identity', () => {
+    const blocks = mapIds.format!({
+      status: 'finished',
+      results: [
+        { from: 'P04637', to: 'ENSG00000141510' },
+        { from: 'P38398', to: 'ENSG00000012048' },
+      ],
+    });
+    expect(blocks.map((b) => (b.type === 'text' ? b.text : '')).join('\n')).toBe(
+      [
+        '**Status:** finished',
+        '',
+        '| From | To |',
+        '| --- | --- |',
+        '| P04637 | ENSG00000141510 |',
+        '| P38398 | ENSG00000012048 |',
+      ].join('\n'),
+    );
   });
 });

@@ -24,6 +24,7 @@ import {
   errorEnvelope,
   INACTIVE_MESSAGES,
   INACTIVE_STUBS,
+  RAW_SNIPPET_ROWS,
   rejectUnmockedFetch,
   requestedUrls,
   required,
@@ -174,6 +175,219 @@ describe('searchProteins inactive hits (real service, through runToolContract)',
     expect(text).toContain(INACTIVE_MESSAGES.merged);
     expect(text).toContain(INACTIVE_MESSAGES.deleted);
     expect(text).not.toContain('No matching proteins.');
+  });
+});
+
+describe('searchProteins inactive stubs under the reviewed and organism filters (#44)', () => {
+  /** The Q15086 stub as rest.uniprot.org returned it (release 2026_04, captured 2026-11-23). */
+  const Q15086_STUB = {
+    entryType: 'Inactive',
+    primaryAccession: 'Q15086',
+    uniProtkbId: 'Q15086',
+    annotationScore: 0.0,
+    inactiveReason: { inactiveReasonType: 'MERGED', mergeDemergeTo: ['P04637'] },
+    extraAttributes: { uniParcId: 'UPI000006CFA4' },
+  };
+  const brca1Row = activeRawEntry('P38398', 'BRCA1_HUMAN', 1863);
+
+  /**
+   * Answer as UniProt does: a stub carries no review tier and no organism, so a
+   * reviewed:true or taxonomy_id: conjunct excludes it unless active:false is OR'ed in
+   * beside the filters; the active human BRCA1 row matches whenever the query names it.
+   */
+  function uniprotFilters() {
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname !== '/uniprotkb/search') return;
+      const query = url.searchParams.get('query') ?? '';
+      const filtered = /reviewed:true|taxonomy_id:/.test(query);
+      const rows = [
+        ...(query.includes('P38398') ? [brca1Row] : []),
+        ...(/q15086/i.test(query) && (!filtered || query.includes(' OR active:false)'))
+          ? [Q15086_STUB]
+          : []),
+      ];
+      const response = upstreamResponse(200, { results: rows });
+      response.headers.set('x-total-results', String(rows.length));
+      return response;
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    searchMock.mockImplementation(realService.search.bind(realService));
+    return fetchStub;
+  }
+
+  type Out = {
+    results: { accession: string }[];
+    inactive?: object[];
+    totalResults: number;
+    effectiveQuery: string;
+    notice?: string;
+  };
+  const Q15086_INACTIVE = {
+    accession: 'Q15086',
+    reason: 'MERGED',
+    replacedBy: ['P04637'],
+    uniParcId: 'UPI000006CFA4',
+  };
+
+  it.each([
+    [{ query: 'accession:Q15086' }, '(accession:Q15086) AND ((reviewed:true) OR active:false)'],
+    [
+      { query: 'accession:Q15086', reviewed: false, organism_id: 9606 },
+      '(accession:Q15086) AND ((taxonomy_id:9606) OR active:false)',
+    ],
+    [{ text_search: 'Q15086' }, '(Q15086) AND ((reviewed:true) OR active:false)'],
+  ])('returns the merged Q15086 in inactive[] for %j on both surfaces', async (args, sent) => {
+    const fetchStub = uniprotFilters();
+    const result = await runToolContract(searchProteins, args as never);
+
+    expect(result.isError).toBeFalsy();
+    expect(requestedUrls(fetchStub)[0]?.searchParams.get('query')).toBe(sent);
+    const out = result.structuredContent as Out;
+    expect(out.effectiveQuery).toBe(sent);
+    expect(out.results).toEqual([]);
+    expect(out.inactive).toEqual([Q15086_INACTIVE]);
+    expect(out.totalResults).toBe(1);
+    expect(out.notice).toBeUndefined();
+    const text = contentText(result);
+    expect(text).toContain(
+      '- **Q15086** — Q15086 is inactive in UniProtKB: merged into P04637. Retry with P04637. UniParc: UPI000006CFA4.',
+    );
+    expect(text).toContain(`Query: \`${sent}\``);
+    expect(text.split('\n')).toContain('**totalResults:** 1');
+    expect(text).not.toContain('No proteins matched');
+  });
+
+  it('returns an active hit in results[] and a named stub in inactive[] under organism_id', async () => {
+    uniprotFilters();
+    const result = await runToolContract(searchProteins, {
+      query: 'accession:Q15086 OR accession:P38398',
+      organism_id: 9606,
+    });
+
+    expect(result.isError).toBeFalsy();
+    const sent =
+      '(accession:Q15086 OR accession:P38398) AND ((taxonomy_id:9606 AND reviewed:true) OR active:false)';
+    const out = result.structuredContent as Out;
+    expect(out.effectiveQuery).toBe(sent);
+    expect(out.results.map((hit) => hit.accession)).toEqual(['P38398']);
+    expect(out.inactive).toEqual([Q15086_INACTIVE]);
+    expect(out.totalResults).toBe(2);
+    const text = contentText(result);
+    expect(text.split('\n')).toContain('**totalResults:** 2');
+    expect(text).toContain('(P38398)');
+    expect(text).toContain('- **Q15086** — Q15086 is inactive in UniProtKB: merged into P04637.');
+    expect(text).toContain(`Query: \`${sent}\``);
+  });
+
+  it('still raises the no-match notice when a named accession matches nothing', async () => {
+    uniprotFilters();
+    const result = await runToolContract(searchProteins, { query: 'accession:Q99999' });
+
+    const out = result.structuredContent as Out;
+    expect(out.effectiveQuery).toBe('(accession:Q99999) AND ((reviewed:true) OR active:false)');
+    expect(out.results).toEqual([]);
+    expect(out).not.toHaveProperty('inactive');
+    expect(out.notice).toBe(
+      'No proteins matched the query. Broaden the terms or set reviewed: false to search both Swiss-Prot and unreviewed TrEMBL. Check field syntax in query.',
+    );
+    expect(contentText(result)).toContain(out.notice);
+  });
+
+  /** `count` distinct accession-shaped tokens: P00000, P00001, … */
+  const accessions = (count: number, prefix = 'P') =>
+    Array.from({ length: count }, (_, i) => `${prefix}${String(i).padStart(5, '0')}`);
+  const orList = (count: number, prefix?: string) =>
+    accessions(count, prefix)
+      .map((accession) => `accession:${accession}`)
+      .join(' OR ');
+
+  it.each([
+    // An accession-shaped token, any case, admits the stubs the clause names.
+    [{ query: 'accession:q15086' }, '(accession:q15086) AND ((reviewed:true) OR active:false)'],
+    [
+      { text_search: 'P04637-2 isoform', organism_id: 9606 },
+      String.raw`(P04637\-2 isoform) AND ((taxonomy_id:9606 AND reviewed:true) OR active:false)`,
+    ],
+    // A caller-pinned tier still takes the appended organism filter, and the branch with it.
+    [
+      { query: 'accession:Q15086 OR reviewed:false', organism_id: 9606 },
+      '(accession:Q15086 OR reviewed:false) AND ((taxonomy_id:9606) OR active:false)',
+    ],
+    // Nothing appended, nothing branched: the clause goes out as written.
+    [{ query: 'accession:Q15086 AND reviewed:true' }, 'accession:Q15086 AND reviewed:true'],
+    [{ query: 'accession:Q15086', reviewed: false }, 'accession:Q15086'],
+    // No accession-shaped token: today's assembly, so a negation or match-all admits no stub.
+    [
+      { query: 'gene_exact:TP53', organism_id: 9606 },
+      '(gene_exact:TP53) AND taxonomy_id:9606 AND reviewed:true',
+    ],
+    [{ query: '*', organism_id: 9606 }, '(*) AND taxonomy_id:9606 AND reviewed:true'],
+    [{ query: 'NOT gene:TP53' }, '(NOT gene:TP53) AND reviewed:true'],
+    [{ text_search: 'C9orf72 P53_HUMAN' }, '(C9orf72 P53_HUMAN) AND reviewed:true'],
+  ])('assembles %j into %j', async (args, sent) => {
+    searchMock.mockResolvedValue(onePage);
+    const ctx = createMockContext({ errors: searchProteins.errors });
+    await searchProteins.handler(searchProteins.input.parse(args), ctx);
+    expect(searchMock.mock.calls[0]![0]).toBe(sent);
+    expect(getEnrichment(ctx).effectiveQuery).toBe(sent);
+  });
+
+  // UniProt answers a query holding more than 100 OR conditions with a 400, and the branch
+  // adds two, so a clause holding more than 98 is sent as before.
+  it.each([
+    ['98 OR-ed accessions (97 ORs)', { query: orList(98) }, true],
+    ['99 OR-ed accessions (98 ORs)', { query: orList(99) }, false],
+    // 97 ORs over two groups is 99 conditions: each group's terms count.
+    [
+      'two OR groups of 50 and 49 accessions (97 ORs)',
+      { query: `(${orList(50)}) AND (${orList(49, 'Q')})` },
+      false,
+    ],
+    ['98 space-separated accessions', { text_search: accessions(98).join(' ') }, true],
+    ['99 space-separated accessions', { text_search: accessions(99).join(' ') }, false],
+  ])('branches %s: %#', async (_what, args, branched) => {
+    searchMock.mockResolvedValue(onePage);
+    const ctx = createMockContext({ errors: searchProteins.errors });
+    await searchProteins.handler(searchProteins.input.parse(args), ctx);
+    const clause = 'query' in args ? args.query : args.text_search;
+    expect(searchMock.mock.calls[0]![0]).toBe(
+      branched
+        ? `(${clause}) AND ((reviewed:true) OR active:false)`
+        : `(${clause}) AND reviewed:true`,
+    );
+  });
+
+  it('round-trips the cursor of a branched query', async () => {
+    searchMock.mockResolvedValue({ ...onePage, cursor: 'NEXT' });
+    const first = await runToolContract(searchProteins, { query: 'accession:Q15086' });
+    const cursor = (first.structuredContent as { cursor: string }).cursor;
+    expect(
+      queryCursor.decode(
+        cursor,
+        'uniprot_search_proteins',
+        '(accession:Q15086) AND ((reviewed:true) OR active:false)',
+      ),
+    ).toBe('NEXT');
+    searchMock.mockClear();
+    const second = await runToolContract(searchProteins, { query: 'accession:Q15086', cursor });
+    expect(second.isError).toBeFalsy();
+    expect(searchMock).toHaveBeenCalledWith(
+      '(accession:Q15086) AND ((reviewed:true) OR active:false)',
+      { cursor: 'NEXT' },
+      expect.anything(),
+    );
+  });
+
+  it('rejects a cursor saved under the unbranched query before any request', async () => {
+    const cursor = queryCursor.encode(
+      'NEXT',
+      'uniprot_search_proteins',
+      '(accession:Q15086) AND reviewed:true',
+    );
+    const result = await runToolContract(searchProteins, { query: 'accession:Q15086', cursor });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'invalid_cursor' });
+    expect(contentText(result)).toContain('no cursor');
+    expect(searchMock).not.toHaveBeenCalled();
   });
 });
 
@@ -390,6 +604,129 @@ describe('searchProteins function snippet (#36, real service)', () => {
   });
 });
 
+describe('searchProteins function snippet molecule (#45, real service)', () => {
+  it("labels a snippet with its FUNCTION comment's molecule on both surfaces, and an unqualified one not at all", async () => {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, { results: [RAW_SNIPPET_ROWS.P01275, RAW_SNIPPET_ROWS.P04637] })
+          : undefined,
+      ),
+    );
+    searchMock.mockImplementation(realService.search.bind(realService));
+
+    const result = await runToolContract(searchProteins, {
+      query: 'accession:P01275 OR accession:P04637',
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as {
+      results: { accession: string; functionSnippetMolecule?: string }[];
+    };
+    expect(out.results.map((hit) => [hit.accession, hit.functionSnippetMolecule])).toEqual([
+      ['P01275', 'Glucagon'],
+      ['P04637', undefined],
+    ]);
+    expect(out.results[1]).not.toHaveProperty('functionSnippetMolecule');
+    expect(
+      contentText(result)
+        .split('\n')
+        .filter((line) => line.startsWith('**Function:**')),
+    ).toEqual([
+      '**Function:** Glucagon: Plays a key role in glucose metabolism and homeostasis. Regulates blood glucose by increasing gluconeogenesis and decreasing glycolysis. A counterregulatory hormone of insulin, raises plasma glucose levels in response to insulin-induced hypoglycemia.',
+      '**Function:** Multifunctional transcription factor that induces cell cycle arrest, DNA repair or apoptosis upon binding to its target DNA sequence.',
+    ]);
+  });
+});
+
+describe('searchProteins sequence flags (real service)', () => {
+  it('keeps a fragment’s flag when a custom fields list leaves out protein_name', async () => {
+    // UniProt sends proteinDescription (which carries the flag) only when protein_name is requested.
+    const fetchStub = routeUpstream((url) => {
+      if (url.pathname !== '/uniprotkb/search') return;
+      const requested = url.searchParams.get('fields')?.split(',') ?? [];
+      return upstreamResponse(200, {
+        results: [
+          {
+            ...activeRawEntry('P0DJE4', 'P0DJE4_TEST', 202),
+            ...(requested.includes('protein_name')
+              ? {
+                  proteinDescription: {
+                    recommendedName: { fullName: { value: 'Protein P0DJE4' } },
+                    flag: 'Fragments',
+                  },
+                }
+              : {}),
+          },
+        ],
+      });
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    searchMock.mockImplementation(realService.search.bind(realService));
+
+    const result = await runToolContract(searchProteins, {
+      query: 'gene:X',
+      fields: 'accession,length',
+    });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as {
+      results: { accession: string; length: number; sequenceFlags?: string[] }[];
+    };
+    expect(out.results[0]).toMatchObject({ length: 202, sequenceFlags: ['Fragments'] });
+    expect(contentText(result)).toContain('202 aa (Fragments)');
+  });
+
+  it('qualifies a flagged hit’s length on both surfaces, and leaves an unflagged one bare', async () => {
+    // Flag values as rest.uniprot.org sent them under the default projection (2026-11-23).
+    const flagged = (accession: string, length: number, flag?: string) => ({
+      ...activeRawEntry(accession, `${accession}_TEST`, length),
+      proteinDescription: {
+        recommendedName: { fullName: { value: `Protein ${accession}` } },
+        ...(flag ? { flag } : {}),
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, {
+              results: [
+                flagged('P0DJE4', 202, 'Fragments'),
+                flagged('P13838', 378, 'Fragment,Precursor'),
+                flagged('P04637', 393),
+              ],
+            })
+          : undefined,
+      ),
+    );
+    searchMock.mockImplementation(realService.search.bind(realService));
+
+    const result = await runToolContract(searchProteins, { query: 'gene:X' });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as {
+      results: { accession: string; sequenceFlags?: string[] }[];
+    };
+    expect(out.results.map((hit) => [hit.accession, hit.sequenceFlags])).toEqual([
+      ['P0DJE4', ['Fragments']],
+      ['P13838', ['Fragment', 'Precursor']],
+      ['P04637', undefined],
+    ]);
+    expect(out.results[2]).not.toHaveProperty('sequenceFlags');
+    expect(
+      contentText(result)
+        .split('\n')
+        .filter((line) => line.startsWith('Reviewed (Swiss-Prot)')),
+    ).toEqual([
+      'Reviewed (Swiss-Prot) · Score 5/5 · 202 aa (Fragments) · 1: Evidence at protein level',
+      'Reviewed (Swiss-Prot) · Score 5/5 · 378 aa (Fragment, Precursor) · 1: Evidence at protein level',
+      'Reviewed (Swiss-Prot) · Score 5/5 · 393 aa · 1: Evidence at protein level',
+    ]);
+  });
+});
+
 describe('searchProteins unbalanced parentheses (through runToolContract)', () => {
   // The caller clause is wrapped as "(<clause>) AND <filters>". A stray ")" closes that
   // wrapper early — "gene:TP53) OR (gene:MDM2" would bind reviewed:true to the last branch
@@ -559,7 +896,8 @@ describe('searchProteins literal text and descendant scope', () => {
   });
 
   // Thread-CPU oracle: a wall-clock timeout measures machine load, not this code (timeout 0).
-  it.each(['NOT ( [ ', '  \r\n', '\\', '§1 x'])(
+  // An accession-shaped token sends the whole text through the OR-condition count (#44).
+  it.each(['NOT ( [ ', '  \r\n', '\\', '§1 x', 'Q15086 OR '])(
     'assembles long plain text with bounded CPU growth: %j',
     async (unit) => {
       searchMock.mockResolvedValue(onePage);
@@ -739,9 +1077,9 @@ describe('searchProteins handler', () => {
   });
 
   it('passes a mandatory-columns-only hit through without an output-validation crash', async () => {
-    // The shape a restrictive custom `fields` yields once the service merges in
-    // MANDATORY_SEARCH_FIELDS — only the required ProteinHit columns, no
-    // proteinName/functionSnippet/commonName. Must still satisfy the output schema.
+    // The shape a restrictive custom `fields` yields for an entry with no recommended
+    // name once the service merges in MANDATORY_FIELDS — only the required ProteinHit
+    // columns, no proteinName/functionSnippet/commonName. Must still satisfy the output schema.
     searchMock.mockResolvedValue({
       results: [
         {
@@ -898,7 +1236,7 @@ describe('searchProteins return fields (#34, real service, through runToolContra
     notice?: string;
   };
   const IDENTITY_FIELDS =
-    'accession,id,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence';
+    'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence';
 
   /** Answer the search with these raw rows and a matching x-total-results. */
   function searchReturns(...rows: object[]) {

@@ -23,24 +23,29 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getServerConfig } from '@/config/server-config.js';
 import type { Entry } from '@/services/uniprot/types.js';
 import { ACCESSION_MESSAGE } from '@/services/uniprot/types.js';
+import biophysicochemicalRows from '../fixtures/biophysicochemical.json' with { type: 'json' };
 import p00533Mutagenesis from '../fixtures/p00533-mutagenesis.json' with { type: 'json' };
 import p00533Sections from '../fixtures/p00533-sections.json' with { type: 'json' };
 import p00918 from '../fixtures/p00918-xrefs.json' with { type: 'json' };
 import p04637Sections from '../fixtures/p04637-sections.json' with { type: 'json' };
 import p07477Default from '../fixtures/p07477-default.json' with { type: 'json' };
+import qualifiedComments from '../fixtures/qualified-comments.json' with { type: 'json' };
 import sectionRows from '../fixtures/section-rows.json' with { type: 'json' };
 import {
   activeRawEntry,
   contentText,
   errorEnvelope,
   expectMcpError,
+  featureLocationRow,
   INACTIVE_MESSAGES,
   INACTIVE_STUBS,
   RAW_ENTRIES,
   rejectUnmockedFetch,
   requestedUrls,
   required,
+  residueCoverageRow,
   routeUpstream,
+  TWO_TEXT_BIOPHYSICOCHEMICAL_ROW,
   upstreamResponse,
 } from '../helpers.js';
 
@@ -135,7 +140,10 @@ describe('getEntry handler', () => {
     }
   });
   it('keeps the complete 24,000-byte result inline and outlines the next two UTF-8 bytes', async () => {
-    const base = { ...brca1, function: [{ value: 'seed' }], xrefs: {} };
+    // A padding character costs one byte on each surface; the second one-letter FUNCTION row
+    // costs an odd number of bytes, so the remainder left to pad comes out even.
+    const tail = { value: 's' };
+    const base = { ...brca1, function: [{ value: 'seed' }, tail], xrefs: {} };
     const empty = { kind: 'full' as const, succeeded: [base], failed: [] };
     const overhead = Buffer.byteLength(
       JSON.stringify({ structuredContent: empty, content: getEntry.format!(empty) }),
@@ -143,20 +151,20 @@ describe('getEntry handler', () => {
     );
     const remaining = 24_000 - overhead;
     expect(remaining % 2).toBe(0);
-    const entry = { ...base, function: [{ value: `seed${'x'.repeat(remaining / 2)}` }] };
+    const entry = { ...base, function: [{ value: `seed${'x'.repeat(remaining / 2)}` }, tail] };
     getEntriesMock.mockResolvedValue(batch(entry));
     const at = await runToolContract(getEntry, { accessions: ['P38398'] });
     expect(Buffer.byteLength(JSON.stringify(at), 'utf8')).toBe(24_000);
     expect(at.structuredContent).toMatchObject({ kind: 'full', succeeded: [entry] });
     getEntriesMock.mockResolvedValue(
-      batch({ ...entry, function: [{ value: `${entry.function[0]?.value}x` }] }),
+      batch({ ...entry, function: [{ value: `${entry.function[0]?.value}x` }, tail] }),
     );
     const over = await runToolContract(getEntry, { accessions: ['P38398'] });
     expect(over.structuredContent).toMatchObject({ kind: 'outline' });
     expect(over.structuredContent).not.toHaveProperty('succeeded');
     // Multibyte annotations consume bytes, not UTF-16 code units.
     getEntriesMock.mockResolvedValue(
-      batch({ ...base, function: [{ value: 'é'.repeat(remaining / 2) }] }),
+      batch({ ...base, function: [{ value: 'é'.repeat(remaining / 2) }, tail] }),
     );
     expect(
       (await runToolContract(getEntry, { accessions: ['P38398'] })).structuredContent,
@@ -240,8 +248,9 @@ describe('getEntry handler', () => {
       succeeded: [{ variants: entry.variants, xrefs: entry.xrefs }],
     });
     const lines = contentText(result).split('\n');
-    expect(lines.filter((line) => /^- \d+: Variant /.test(line))).toEqual(
-      Array.from({ length: 40 }, (_, i) => `- ${i + 1}: Variant ${i}`),
+    // Each location carries no end, which the one span formatter renders as `?`.
+    expect(lines.filter((line) => /^- \d+\.\.\?: Variant /.test(line))).toEqual(
+      Array.from({ length: 40 }, (_, i) => `- ${i + 1}..?: Variant ${i}`),
     );
     expect(lines).toContain(
       `- \`PDB\`: ${Array.from({ length: 40 }, (_, i) => `\`PDB-${i}\``).join(', ')}`,
@@ -367,17 +376,26 @@ describe('getEntry handler', () => {
 /**
  * A BRCA1-shaped record whose one-accession result measures exactly `bytes` UTF-8 bytes
  * across both surfaces: every added 'x' costs one byte in structuredContent and one in
- * content[]. Accessions of one length share the overhead.
+ * content[], so padding moves the size in steps of two, and a second one-letter FUNCTION
+ * row, which costs an odd number of bytes, settles the parity. Accessions of one length
+ * share the overhead.
  */
 function sizedEntry(accession: string, bytes: number): Entry {
-  const base = { ...brca1, accession, function: [{ value: 'seed' }], xrefs: {} };
-  const empty = { kind: 'full' as const, succeeded: [base], failed: [] };
-  const overhead = Buffer.byteLength(
-    JSON.stringify({ structuredContent: empty, content: getEntry.format!(empty) }),
-    'utf8',
-  );
-  if ((bytes - overhead) % 2 !== 0) throw new Error(`odd remainder for ${bytes} bytes`);
-  return { ...base, function: [{ value: `seed${'x'.repeat((bytes - overhead) / 2)}` }] };
+  for (const extra of [[], [{ value: 's' }]]) {
+    const base = { ...brca1, accession, function: [{ value: 'seed' }, ...extra], xrefs: {} };
+    const empty = { kind: 'full' as const, succeeded: [base], failed: [] };
+    const overhead = Buffer.byteLength(
+      JSON.stringify({ structuredContent: empty, content: getEntry.format!(empty) }),
+      'utf8',
+    );
+    if ((bytes - overhead) % 2 === 0) {
+      return {
+        ...base,
+        function: [{ value: `seed${'x'.repeat((bytes - overhead) / 2)}` }, ...extra],
+      };
+    }
+  }
+  throw new Error(`no padding reaches exactly ${bytes} bytes`);
 }
 
 /** UTF-8 bytes of a tool result across both surfaces, as the tool's budget measures it. */
@@ -396,13 +414,14 @@ describe('getEntry per-record overflow (#40)', () => {
   const over = sizedEntry('P38392', 24_002);
   const far = sizedEntry('P38393', 30_000);
   const small = { ...brca1, accession: 'P38394' };
+  const edge = sizedEntry('P38395', 24_001);
 
-  it('measures each record exactly as its one-accession call does: 24,000 inline, 24,002 outlined', async () => {
+  it('measures each record exactly as its one-accession call does: 24,000 inline, 24,001 outlined', async () => {
     getEntriesMock.mockResolvedValue(batch(at));
     const alone = await runToolContract(getEntry, { accessions: ['P38391'] });
     expect(alone.structuredContent).toMatchObject({ kind: 'full', succeeded: [at] });
     expect(resultBytes(alone)).toBe(24_000);
-    for (const record of [over, far]) {
+    for (const record of [edge, over, far]) {
       getEntriesMock.mockResolvedValue(batch(record));
       const outlined = await runToolContract(getEntry, { accessions: [record.accession] });
       expect(outlined.structuredContent).toMatchObject({ kind: 'outline' });
@@ -413,9 +432,9 @@ describe('getEntry per-record overflow (#40)', () => {
   });
 
   it('inlines every record that fits alone and lists only the oversized ones, request order kept in both lists', async () => {
-    getEntriesMock.mockResolvedValue(batch(small, far, at, over));
+    getEntriesMock.mockResolvedValue(batch(small, far, edge, at, over));
     const result = await runToolContract(getEntry, {
-      accessions: ['P38392', 'P38391', 'P38393', 'P38394'],
+      accessions: ['P38392', 'P38395', 'P38391', 'P38393', 'P38394'],
     });
 
     expect(result.isError).toBeFalsy();
@@ -424,6 +443,7 @@ describe('getEntry per-record overflow (#40)', () => {
     expect(out.succeeded).toEqual([at, small]);
     expect(out.outlinedEntries).toEqual([
       { accession: 'P38392', bytes: 24_002 },
+      { accession: 'P38395', bytes: 24_001 },
       { accession: 'P38393', bytes: 30_000 },
     ]);
     expect(out.failed).toEqual([]);
@@ -435,9 +455,12 @@ describe('getEntry per-record overflow (#40)', () => {
     expect(text).toContain('# Breast cancer type 1 susceptibility protein (P38391)');
     expect(text).toContain('# Breast cancer type 1 susceptibility protein (P38394)');
     expect(text).toContain('- **P38392** — 24002 bytes; re-call with accessions:["P38392"].');
+    expect(text).toContain('- **P38395** — 24001 bytes; re-call with accessions:["P38395"].');
     expect(text).toContain('- **P38393** — 30000 bytes; re-call with accessions:["P38393"].');
     expect(text).not.toContain('# Breast cancer type 1 susceptibility protein (P38392)');
+    expect(text).not.toContain('# Breast cancer type 1 susceptibility protein (P38395)');
     expect(out.notice).toContain('accessions:["P38392"]');
+    expect(out.notice).toContain('accessions:["P38395"]');
     expect(out.notice).toContain('accessions:["P38393"]');
     expect(text).toContain(out.notice as string);
   });
@@ -991,7 +1014,8 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       Reviewed (Swiss-Prot) · Score 5/5 · 393 aa · 1: Evidence at protein level
       **Organism:** Homo sapiens (Human) "HUMAN" [taxon 9606]
       **Genes:** TP53
-      **Function:** Acts as a tumor suppressor. (PubMed:11025664)
+      **Function:**
+      - Acts as a tumor suppressor. (PubMed:11025664)
       **Disease:**
       - Li-Fraumeni syndrome [OMIM:151623] [DI-00001]
       **Variants:** 1 natural variant(s)
@@ -1028,7 +1052,8 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       Reviewed (Swiss-Prot) · Score 5/5 · 393 aa · 1: Evidence at protein level
       **Organism:** Homo sapiens (Human) "HUMAN" [taxon 9606]
       **Genes:** TP53
-      **Function:** Acts as a tumor suppressor. (PubMed:11025664)
+      **Function:**
+      - Acts as a tumor suppressor. (PubMed:11025664)
       **Disease:**
       - Li-Fraumeni syndrome [OMIM:151623] [DI-00001]
       **Variants:** 1 natural variant(s)
@@ -1075,7 +1100,8 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       Reviewed (Swiss-Prot) · Score 5/5 · 393 aa · 1: Evidence at protein level
       **Organism:** Homo sapiens (Human) "HUMAN" [taxon 9606]
       **Genes:** TP53
-      **Function:** Acts as a tumor suppressor. (PubMed:11025664)
+      **Function:**
+      - Acts as a tumor suppressor. (PubMed:11025664)
       **Disease:**
       - Li-Fraumeni syndrome [OMIM:151623] [DI-00001]
       **Variants:** 30 natural variant(s)
@@ -1139,33 +1165,33 @@ describe('getEntry unbounded output (through runToolContract)', () => {
       - Modified residue @27 [PRO_0000026]: Phosphoserine 26
       - Modified residue @28 [PRO_0000027]: Phosphoserine 27
       **Domains/regions:**
-      - Region 1-9: Region 0
-      - Region 11-19: Region 1
-      - Region 21-29: Region 2
-      - Region 31-39: Region 3
-      - Region 41-49: Region 4
-      - Region 51-59: Region 5
-      - Region 61-69: Region 6
-      - Region 71-79: Region 7
-      - Region 81-89: Region 8
-      - Region 91-99: Region 9
-      - Region 101-109: Region 10
-      - Region 111-119: Region 11
-      - Region 121-129: Region 12
-      - Region 131-139: Region 13
-      - Region 141-149: Region 14
-      - Region 151-159: Region 15
-      - Region 161-169: Region 16
-      - Region 171-179: Region 17
-      - Region 181-189: Region 18
-      - Region 191-199: Region 19
-      - Region 201-209: Region 20
-      - Region 211-219: Region 21
-      - Region 221-229: Region 22
-      - Region 231-239: Region 23
-      - Region 241-249: Region 24
-      - Region 251-259: Region 25
-      - Region 261-269: Region 26
+      - Region 1..9: Region 0
+      - Region 11..19: Region 1
+      - Region 21..29: Region 2
+      - Region 31..39: Region 3
+      - Region 41..49: Region 4
+      - Region 51..59: Region 5
+      - Region 61..69: Region 6
+      - Region 71..79: Region 7
+      - Region 81..89: Region 8
+      - Region 91..99: Region 9
+      - Region 101..109: Region 10
+      - Region 111..119: Region 11
+      - Region 121..129: Region 12
+      - Region 131..139: Region 13
+      - Region 141..149: Region 14
+      - Region 151..159: Region 15
+      - Region 161..169: Region 16
+      - Region 171..179: Region 17
+      - Region 181..189: Region 18
+      - Region 191..199: Region 19
+      - Region 201..209: Region 20
+      - Region 211..219: Region 21
+      - Region 221..229: Region 22
+      - Region 231..239: Region 23
+      - Region 241..249: Region 24
+      - Region 251..259: Region 25
+      - Region 261..269: Region 26
       **Cross-references:**
       - \`PDB\`: \`1ABC\`, \`2ABC\`, \`3ABC\`, \`4ABC\`, \`5ABC\`, \`6ABC\`, \`7ABC\`, \`8ABC\`, \`9ABC\`, \`10ABC\`, \`11ABC\`, \`12ABC\`, \`13ABC\`, \`14ABC\`, \`15ABC\`, \`16ABC\`, \`17ABC\`, \`18ABC\`, \`19ABC\`, \`20ABC\`, \`21ABC\`, \`22ABC\`, \`23ABC\`, \`24ABC\`, \`25ABC\`, \`26ABC\`, \`27ABC\`, \`28ABC\`, \`29ABC\`, \`30ABC\`, \`31ABC\`, \`32ABC\`, \`33ABC\`, \`34ABC\`, \`35ABC\`
       - \`ChEMBL\`: \`CHEMBL4096\`"
@@ -1684,20 +1710,22 @@ describe('getEntry full curated records (real service, through runToolContract)'
         'Reviewed (Swiss-Prot) · Score 5/5 · 452 aa · 1: Evidence at protein level',
         '**Organism:** Homo sapiens (Human) "HUMAN" [taxon 9606]',
         '**Genes:** PAH',
-        '**Function:** Catalyzes the hydroxylation of L-phenylalanine to L-tyrosine (PubMed:18460651, PubMed:18835579)',
+        '**Function:**',
+        '- Catalyzes the hydroxylation of L-phenylalanine to L-tyrosine (PubMed:18460651, PubMed:18835579)',
         '**Catalytic activity:**',
-        `- ${RAW_ENTRIES.pah.comments[1].reaction.name} (RHEA:20273) [EC 1.14.16.1]`,
-        '**Cofactors:** Fe(2+) (CHEBI:29033)',
+        `- ${RAW_ENTRIES.pah.comments[1].reaction.name} (RHEA:20273) [EC 1.14.16.1] (PubMed:18460651)`,
+        '**Cofactors:**',
+        '- Fe(2+) (CHEBI:29033) (UniProtKB:P04176)',
         '**Disease:**',
         `- Phenylalanine hydroxylase deficiency (PAH deficiency) [OMIM:261600] [DI-02159]: ${RAW_ENTRIES.pah.comments[3].disease.description}`,
         '**Variants:** 3 natural variant(s)',
         '- 16 S→P [VAR_000869]: in PAH deficiency; severe; uncertain significance; dbSNP:rs62642946',
-        '- 63-64 TH→PN [VAR_000881]: in PAH deficiency; severe; abolishes phenylalanine binding',
+        '- 63..64 TH→PN [VAR_000881]: in PAH deficiency; severe; abolishes phenylalanine binding',
         '- 39 [VAR_000871]: in PAH deficiency; severe',
         '**PTMs:** 1',
         '- Modified residue @16: Phosphoserine; by PKA',
         '**Domains/regions:**',
-        '- Domain 36-114: ACT',
+        '- Domain 36..114: ACT',
         '**GO:** GO:0005829 [C] cytosol (TAS:Reactome); GO:0005506 [F] iron ion binding (IEA:InterPro)',
         '**Keywords:** 3D-structure (KW-0002) — Technical term, Allosteric enzyme (KW-0021) — Molecular function',
         '**Cross-references:**',
@@ -1712,16 +1740,18 @@ describe('getEntry full curated records (real service, through runToolContract)'
       expect.arrayContaining([
         '# Cellular tumor antigen p53 (P04637)',
         '**Genes:** TP53, P53',
-        '**Subcellular location:** Cytoplasm; Nucleus',
-        '**Isoforms:** P04637-1 (1) [Displayed], P04637-2 (2) [Described]',
+        '**Subcellular location:**',
+        '- Cytoplasm (PubMed:15340061)',
+        '- Nucleus (PubMed:15340061)',
+        '**Isoforms:** P04637-1 (1; synonyms p53, p53alpha) [Displayed], P04637-2 (2; synonyms I9RET, p53beta) [Described]',
         '- Esophageal cancer (ESCR) [OMIM:133239] [DI-01537]: A malignancy of the esophagus. — The disease is caused by variants affecting the gene represented in this entry',
-        '- Region 100-370: Interaction with HIPK1',
+        '- Region 100..370: Interaction with HIPK1',
         '- Modified residue @9: Phosphoserine; by HIPK4',
       ]),
     );
-    // P08100 — a location with its membrane topology.
+    // P08100 — a location with its membrane topology and the location's own evidence.
     expect(lines).toContain(
-      '**Subcellular location:** Photoreceptor outer segment membrane (Multi-pass membrane protein)',
+      '- Photoreceptor outer segment membrane (Multi-pass membrane protein) (PubMed:25664179)',
     );
     expect(contentText(result)).not.toContain('undefined');
     expect(fetchStub).toHaveBeenCalledTimes(1);
@@ -1747,12 +1777,1678 @@ describe('getEntry full curated records (real service, through runToolContract)'
       expect.arrayContaining([
         '# Insulin (P01308)',
         '**PTMs:** 2',
-        '- Disulfide bond @31-96: Interchain (between B and A chains)',
-        '- Disulfide bond @95-100',
+        '- Disulfide bond @31..96: Interchain (between B and A chains)',
+        '- Disulfide bond @95..100',
       ]),
     );
     const [url] = requestedUrls(fetchStub);
     expect(url?.searchParams.get('fields')?.split(',')).toContain('ft_disulfid');
+  });
+});
+
+/** UniProt's sequence flag (`proteinDescription.flag`), as rest.uniprot.org sent it on 2026-11-23. */
+describe('getEntry sequence flags (real service, through runToolContract)', () => {
+  type Out = { kind: string; succeeded: Entry[] };
+  const flagged = (accession: string, length: number, flag?: string) => ({
+    ...activeRawEntry(accession, `${accession}_TEST`, length),
+    proteinDescription: {
+      recommendedName: { fullName: { value: `Protein ${accession}` } },
+      ...(flag ? { flag } : {}),
+    },
+    comments: [{ commentType: 'FUNCTION', texts: [{ value: 'Binds things.' }] }],
+  });
+  const serve = (...rows: object[]) => {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search' ? upstreamResponse(200, { results: rows }) : undefined,
+      ),
+    );
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+  };
+
+  it('qualifies a flagged entry’s length on both surfaces, and leaves an unflagged one bare', async () => {
+    serve(
+      flagged('O35116', 264, 'Fragment'),
+      flagged('P13838', 378, 'Fragment,Precursor'),
+      flagged('P04637', 393),
+    );
+    const result = await runToolContract(getEntry, { accessions: ['O35116', 'P13838', 'P04637'] });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as Out;
+    expect(out.succeeded.map((e) => [e.accession, e.sequenceFlags])).toEqual([
+      ['O35116', ['Fragment']],
+      ['P13838', ['Fragment', 'Precursor']],
+      ['P04637', undefined],
+    ]);
+    expect(out.succeeded[2]).not.toHaveProperty('sequenceFlags');
+    expect(
+      contentText(result)
+        .split('\n')
+        .filter((line) => line.startsWith('Reviewed (Swiss-Prot)')),
+    ).toEqual([
+      'Reviewed (Swiss-Prot) · Score 5/5 · 264 aa (Fragment) · 1: Evidence at protein level',
+      'Reviewed (Swiss-Prot) · Score 5/5 · 378 aa (Fragment, Precursor) · 1: Evidence at protein level',
+      'Reviewed (Swiss-Prot) · Score 5/5 · 393 aa · 1: Evidence at protein level',
+    ]);
+  });
+
+  it('keeps the flags beside length on a sections re-call, as identity', async () => {
+    serve(flagged('O35116', 264, 'Fragment'));
+    const result = await runToolContract(getEntry, {
+      accessions: ['O35116'],
+      sections: ['function'],
+    });
+
+    expect(result.isError).toBeFalsy();
+    const [entry] = (result.structuredContent as Out).succeeded;
+    expect(entry).toMatchObject({ length: 264, sequenceFlags: ['Fragment'] });
+    expect(contentText(result)).toContain(
+      'Reviewed (Swiss-Prot) · Score 5/5 · 264 aa (Fragment) · 1: Evidence at protein level',
+    );
+  });
+});
+
+/**
+ * Feature locations in UniProt's notation, over the rows in `feature-locations.json`
+ * (see `featureLocationRow` in tests/helpers.ts): each case of the one span formatter on
+ * content[], beside the location fields structuredContent carries, once per render path —
+ * featureLine (processing, topology, sites, domains), PTM rows, and residue changes.
+ */
+describe('getEntry feature locations (#46, real service over captured rows, through runToolContract)', () => {
+  type Out = { kind: string; succeeded: Entry[] };
+
+  /** Run the tool through the real service, the batch search answering with these rows. */
+  async function call(input: Record<string, unknown>, ...rows: object[]) {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search' ? upstreamResponse(200, { results: rows }) : undefined,
+      ),
+    );
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+    const result = await runToolContract(getEntry, input as never);
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as Out;
+    return {
+      entry: (accession: string) => out.succeeded.find((e) => e.accession === accession),
+      lines: contentText(result).split('\n'),
+    };
+  }
+
+  it('renders an UNSURE, OUTSIDE, or UNKNOWN bound in UniProt notation, with its modifier on structuredContent', async () => {
+    const { entry, lines } = await call(
+      { accessions: ['O75339', 'O35116', 'O43240', 'O00533', 'P35573'] },
+      featureLocationRow('O75339'),
+      featureLocationRow('O35116'),
+      featureLocationRow('O43240'),
+      featureLocationRow('O00533'),
+      featureLocationRow('P35573'),
+    );
+
+    expect(entry('O75339')?.processing?.map((f) => f.location)).toStrictEqual([
+      { start: 1, end: 21 },
+      { start: 22, end: 724, endModifier: 'UNSURE' },
+      { start: 725, end: 1184, startModifier: 'UNSURE' },
+    ]);
+    expect(entry('O35116')?.processing?.[0]?.location).toStrictEqual({
+      start: 1,
+      end: 264,
+      startModifier: 'OUTSIDE',
+      endModifier: 'OUTSIDE',
+    });
+    expect(entry('O43240')?.ptms?.[0]?.location).toStrictEqual({
+      end: 263,
+      startModifier: 'UNKNOWN',
+    });
+    expect(entry('O00533')?.processing?.[0]?.location).toStrictEqual({
+      start: 25,
+      endModifier: 'UNKNOWN',
+    });
+    expect(entry('P35573')?.domains?.map((f) => f.location)).toStrictEqual([
+      { start: 1, endModifier: 'UNKNOWN' },
+      { end: 1532, startModifier: 'UNKNOWN' },
+    ]);
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '- Signal 1..21',
+        '- Chain 22..?724 [PRO_0000014672]: Cartilage intermediate layer protein 1 C1',
+        '- Chain ?725..1184 [PRO_0000014673]: Cartilage intermediate layer protein 1 C2',
+        '- Chain <1..>264 [PRO_0000064301]: Catenin delta-2',
+        '- Disulfide bond @?..263',
+        '- Chain 25..? [PRO_0000314777]: Processed neural cell adhesion molecule L1-like protein',
+        '- Region 1..?: 4-alpha-glucanotransferase',
+        '- Region ?..1532: Amylo-1,6-glucosidase',
+      ]),
+    );
+  });
+
+  it('prefixes a position numbered on an isoform with that isoform, in PTMs, variants, and mutagenesis', async () => {
+    const { entry, lines } = await call(
+      {
+        accessions: ['O00139', 'A2RU49', 'O15294'],
+        fields: 'accession,ft_mod_res,ft_variant,ft_mutagen',
+      },
+      featureLocationRow('O00139'),
+      featureLocationRow('A2RU49'),
+      featureLocationRow('O15294'),
+    );
+
+    expect(entry('O00139')?.ptms?.map((f) => f.location)).toStrictEqual([
+      { start: 556, end: 556, isoform: 'O00139-4' },
+      { start: 573, end: 573, isoform: 'O00139-4' },
+    ]);
+    expect(entry('A2RU49')?.variants?.[0]?.location).toStrictEqual({
+      start: 165,
+      end: 165,
+      isoform: 'A2RU49-2',
+    });
+    expect(entry('O15294')?.mutagenesis?.[0]?.location).toStrictEqual({
+      start: 10,
+      end: 10,
+      isoform: 'O15294-4',
+    });
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '- Modified residue @O00139-4:556: Phosphoserine',
+        '- Modified residue @O00139-4:573: Phosphoserine',
+        '- A2RU49-2:165 V→I [VAR_082892]: in dbSNP:4380026',
+        '- O15294-4:10 S→A: Does not affect global auto-O-GlcNAcylation.',
+      ]),
+    );
+  });
+
+  it('renders OUTSIDE bounds on membrane topology and a binding site, and a one-residue span once', async () => {
+    const { entry, lines } = await call(
+      { accessions: ['O70431', 'P05207', 'Q16739'] },
+      featureLocationRow('O70431'),
+      featureLocationRow('P05207'),
+      featureLocationRow('Q16739'),
+    );
+
+    expect(entry('O70431')?.topology?.map((f) => f.location)).toStrictEqual([
+      { start: 1, end: 21, startModifier: 'OUTSIDE' },
+      { start: 232, end: 251, endModifier: 'OUTSIDE' },
+    ]);
+    expect(entry('P05207')?.sites?.[0]?.location).toStrictEqual({
+      start: 82,
+      end: 155,
+      endModifier: 'OUTSIDE',
+    });
+    expect(entry('Q16739')?.domains?.[0]?.location).toStrictEqual({ start: 144, end: 144 });
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '- Transmembrane <1..21: Helical; Name=2',
+        '- Transmembrane 232..>251: Helical; Name=7',
+        "- Binding site 82..>155 — 3',5'-cyclic AMP (CHEBI:58165) label 1",
+        '- Motif 144: D2',
+      ]),
+    );
+  });
+
+  it('renders both bounds of a one-residue span whose modifier marks one side only', async () => {
+    const row = featureLocationRow('Q16739');
+    const motif = required(row.features[0], 'the Q16739 motif');
+    const { entry, lines } = await call(
+      { accessions: ['Q16739'] },
+      {
+        ...row,
+        features: [
+          { ...motif, location: { ...motif.location, start: { value: 144, modifier: 'UNSURE' } } },
+          { ...motif, location: { ...motif.location, end: { value: 144, modifier: 'OUTSIDE' } } },
+        ],
+      },
+    );
+
+    expect(entry('Q16739')?.domains?.map((f) => f.location)).toStrictEqual([
+      { start: 144, end: 144, startModifier: 'UNSURE' },
+      { start: 144, end: 144, endModifier: 'OUTSIDE' },
+    ]);
+    expect(lines).toEqual(
+      expect.arrayContaining(['- Motif ?144..144: D2', '- Motif 144..>144: D2']),
+    );
+  });
+
+  it('keeps a modifier outside UniProt’s three as written, naming it after the span on content[]', async () => {
+    const row = featureLocationRow('O75339');
+    const c2 = required(row.features[2], 'the O75339 C2 chain');
+    const { entry, lines } = await call(
+      { accessions: ['O75339'] },
+      {
+        ...row,
+        features: [
+          { ...c2, location: { ...c2.location, start: { value: 725, modifier: 'APPROXIMATE' } } },
+        ],
+      },
+    );
+
+    expect(entry('O75339')?.processing?.[0]?.location).toStrictEqual({
+      start: 725,
+      end: 1184,
+      startModifier: 'APPROXIMATE',
+    });
+    expect(lines).toContain(
+      '- Chain ?725..1184 (start modifier APPROXIMATE) [PRO_0000014673]: Cartilage intermediate layer protein 1 C2',
+    );
+  });
+
+  it('names an unmarked end modifier after the span too, alone or beside the start’s', async () => {
+    const row = featureLocationRow('O75339');
+    const signal = required(row.features[0], 'the O75339 signal');
+    const c1 = required(row.features[1], 'the O75339 C1 chain');
+    const { entry, lines } = await call(
+      { accessions: ['O75339'] },
+      {
+        ...row,
+        features: [
+          {
+            ...signal,
+            location: {
+              start: { value: 1, modifier: 'APPROXIMATE' },
+              end: { value: 21, modifier: 'APPROXIMATE' },
+            },
+          },
+          { ...c1, location: { ...c1.location, end: { value: 724, modifier: 'APPROXIMATE' } } },
+        ],
+      },
+    );
+
+    expect(entry('O75339')?.processing?.map((f) => f.location)).toStrictEqual([
+      { start: 1, end: 21, startModifier: 'APPROXIMATE', endModifier: 'APPROXIMATE' },
+      { start: 22, end: 724, endModifier: 'APPROXIMATE' },
+    ]);
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '- Signal ?1..?21 (start modifier APPROXIMATE, end modifier APPROXIMATE)',
+        '- Chain 22..?724 (end modifier APPROXIMATE) [PRO_0000014672]: Cartilage intermediate layer protein 1 C1',
+      ]),
+    );
+  });
+});
+
+/**
+ * The residue input (#48), through the real service over the rows in `residue-coverage.json`
+ * (see `residueCoverageRow` in tests/helpers.ts) and `feature-locations.json`: the rows each
+ * position-bearing section keeps, residueCoverage and the section headings on both surfaces,
+ * the cut ahead of the window and the outline budget, and the two residue errors. The coverage
+ * rule itself is tabled once, in tests/services/residue-coverage.test.ts.
+ */
+describe('getEntry residue (#48, real service over captured rows, through runToolContract)', () => {
+  type Coverage = {
+    residue: number;
+    sections: { section: string; covered: number; excluded: number; total: number }[];
+  };
+  type Out = Record<string, unknown> & {
+    kind: string;
+    succeeded?: Entry[];
+    sections?: { name: string; bytes: number }[];
+    residueCoverage?: Coverage;
+    notice?: string;
+  };
+
+  /** Run the tool through the real service, the batch search answering with these rows. */
+  async function call(input: Record<string, unknown>, ...rows: object[]) {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search' ? upstreamResponse(200, { results: rows }) : undefined,
+      ),
+    );
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+    const result = await runToolContract(getEntry, input as never);
+    const text = contentText(result);
+    return { result, out: result.structuredContent as Out, text, lines: text.split('\n') };
+  }
+
+  /** A successful call and its one record. */
+  async function entryAt(input: Record<string, unknown>, ...rows: object[]) {
+    const run = await call(input, ...rows);
+    expect(run.result.isError).toBeFalsy();
+    return { ...run, entry: required(run.out.succeeded?.[0], 'the returned record') };
+  }
+
+  /** UTF-8 bytes of a value as the outline sizes it. */
+  const bytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), 'utf8');
+
+  const p53 = residueCoverageRow('P04637');
+
+  /** P04637's natural variants at R175, normalized, in UniProt order. */
+  const VARIANTS_175 = [
+    ['VAR_005928', 'C'],
+    ['VAR_005929', 'G'],
+    ['VAR_005932', 'H'],
+    ['VAR_005930', 'L'],
+    ['VAR_005931', 'P'],
+    ['VAR_044916', 'Q'],
+    ['VAR_044917', 'S'],
+  ].map(([featureId, variation]) => ({
+    location: { start: 175, end: 175 },
+    original: 'R',
+    variation,
+    featureId,
+  }));
+  const VARIANT_IDS_175 = VARIANTS_175.map((v) => v.featureId);
+
+  /** P04637's DNA-binding region and the five interaction regions spanning 175, in UniProt order. */
+  const DOMAINS_175 = [
+    { type: 'DNA binding', location: { start: 102, end: 292 } },
+    ...(
+      [
+        [1, 320, 'Interaction with CCAR2'],
+        [100, 370, 'Interaction with HIPK1'],
+        [100, 300, 'Required for interaction with ZNF385A'],
+        [113, 236, 'Required for interaction with FBXO42'],
+        [116, 292, 'Interaction with AXIN1'],
+      ] as const
+    ).map(([start, end, description]) => ({
+      type: 'Region',
+      description,
+      location: { start, end },
+    })),
+  ];
+
+  it('keeps the variants and domains covering P04637 R175, with residueCoverage, on both surfaces', async () => {
+    const { out, entry, lines } = await entryAt(
+      { accessions: ['P04637'], residue: 175, sections: ['variants', 'domains'] },
+      p53,
+    );
+
+    expect(entry.variants).toStrictEqual(VARIANTS_175);
+    expect(entry.domains).toStrictEqual(DOMAINS_175);
+    expect(entry).not.toHaveProperty('ptms');
+    expect(out.residue).toBe(175);
+    expect(out.residueCoverage).toStrictEqual({
+      residue: 175,
+      sections: [
+        { section: 'variants', covered: 7, excluded: 0, total: 1363 },
+        { section: 'domains', covered: 6, excluded: 0, total: 26 },
+      ],
+    });
+    expect(out).not.toHaveProperty('absentSections');
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Variants:** 7 natural variant(s) covering residue 175',
+        ...VARIANTS_175.map((v) => `- 175 R→${v.variation} [${v.featureId}]`),
+        '**Domains/regions:** covering residue 175',
+        '- DNA binding 102..292',
+        '- Region 1..320: Interaction with CCAR2',
+        '- Region 100..370: Interaction with HIPK1',
+        '- Region 100..300: Required for interaction with ZNF385A',
+        '- Region 113..236: Required for interaction with FBXO42',
+        '- Region 116..292: Interaction with AXIN1',
+        '**Residue 175 coverage:** variants 7 of 1363 rows; domains 6 of 26 rows',
+      ]),
+    );
+    // Only covering rows render: the neighbors at 176..177 and 169..170 are cut.
+    expect(lines.filter((line) => /^- \d/.test(line))).toHaveLength(7);
+    expect(lines.filter((line) => line.startsWith('- Region '))).toHaveLength(5);
+  });
+
+  it('keeps only the Zn(2+) binding site at P04637 176', async () => {
+    const { out, entry, lines } = await entryAt(
+      { accessions: ['P04637'], residue: 176, sections: ['sites'] },
+      p53,
+    );
+
+    expect(entry.sites).toStrictEqual([
+      {
+        type: 'Binding site',
+        location: { start: 176, end: 176 },
+        ligand: { name: 'Zn(2+)', chebiId: 'CHEBI:29105' },
+      },
+    ]);
+    expect(out.residueCoverage).toStrictEqual({
+      residue: 176,
+      sections: [{ section: 'sites', covered: 1, excluded: 0, total: 5 }],
+    });
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Sites:** 1 covering residue 176',
+        '- Binding site 176 — Zn(2+) (CHEBI:29105)',
+        '**Residue 176 coverage:** sites 1 of 5 rows',
+      ]),
+    );
+  });
+
+  it.each([
+    [
+      52,
+      { type: 'Disulfide bond', location: { start: 52, end: 162 } },
+      '- Disulfide bond @52..162',
+    ],
+    [
+      263,
+      { type: 'Disulfide bond', location: { end: 263, startModifier: 'UNKNOWN' } },
+      '- Disulfide bond @?..263',
+    ],
+  ])('keeps the O43240 disulfide bond bonded at residue %i', async (residue, bond, line) => {
+    const { out, entry, lines } = await entryAt(
+      { accessions: ['O43240'], residue, sections: ['ptms'] },
+      residueCoverageRow('O43240'),
+    );
+
+    expect(entry.ptms).toStrictEqual([bond]);
+    expect(out.residueCoverage).toStrictEqual({
+      residue,
+      sections: [{ section: 'ptms', covered: 1, excluded: 0, total: 7 }],
+    });
+    expect(lines).toEqual(
+      expect.arrayContaining([`**PTMs:** 1 covering residue ${residue}`, line]),
+    );
+  });
+
+  it('leaves out a section no row covers — O43240 residue 100, between the 52..162 bond’s partners — without calling it absent', async () => {
+    const { out, entry, text, lines } = await entryAt(
+      { accessions: ['O43240'], residue: 100, sections: ['ptms'] },
+      residueCoverageRow('O43240'),
+    );
+
+    expect(entry).not.toHaveProperty('ptms');
+    expect(entry).toMatchObject({ accession: 'O43240', entryName: 'KLK10_HUMAN', length: 276 });
+    expect(out).not.toHaveProperty('absentSections');
+    expect(out.residueCoverage).toStrictEqual({
+      residue: 100,
+      sections: [{ section: 'ptms', covered: 0, excluded: 0, total: 7 }],
+    });
+    expect(text).not.toContain('**PTMs:**');
+    expect(text).not.toContain('Absent sections');
+    expect(lines).toContain('**Residue 100 coverage:** ptms 0 of 7 rows');
+  });
+
+  it('keeps the O75339 chains ending at an UNSURE 724 with their modifier, not the one starting at an UNSURE 725', async () => {
+    const { out, entry, text, lines } = await entryAt(
+      { accessions: ['O75339'], residue: 724, sections: ['processing'] },
+      residueCoverageRow('O75339'),
+    );
+
+    expect(entry.processing).toStrictEqual([
+      {
+        type: 'Chain',
+        description: 'Cartilage intermediate layer protein 1',
+        location: { start: 22, end: 1184 },
+        featureId: 'PRO_0000014671',
+      },
+      {
+        type: 'Chain',
+        description: 'Cartilage intermediate layer protein 1 C1',
+        location: { start: 22, end: 724, endModifier: 'UNSURE' },
+        featureId: 'PRO_0000014672',
+      },
+    ]);
+    expect(out.residueCoverage?.sections).toStrictEqual([
+      { section: 'processing', covered: 2, excluded: 0, total: 4 },
+    ]);
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Processing:** covering residue 724',
+        '- Chain 22..1184 [PRO_0000014671]: Cartilage intermediate layer protein 1',
+        '- Chain 22..?724 [PRO_0000014672]: Cartilage intermediate layer protein 1 C1',
+        '**Residue 724 coverage:** processing 2 of 4 rows',
+      ]),
+    );
+    expect(text).not.toContain('PRO_0000014673');
+  });
+
+  it('cuts the default record, without sections: O35116 residue 1 keeps its chain with both OUTSIDE bounds', async () => {
+    const { out, entry, lines } = await entryAt(
+      { accessions: ['O35116'], residue: 1 },
+      featureLocationRow('O35116'),
+    );
+
+    expect(out.kind).toBe('full');
+    expect(entry.processing).toStrictEqual([
+      {
+        type: 'Chain',
+        description: 'Catenin delta-2',
+        location: { start: 1, end: 264, startModifier: 'OUTSIDE', endModifier: 'OUTSIDE' },
+        featureId: 'PRO_0000064301',
+      },
+    ]);
+    expect(out.residue).toBe(1);
+    expect(out.residueCoverage).toStrictEqual({
+      residue: 1,
+      sections: [{ section: 'processing', covered: 1, excluded: 0, total: 1 }],
+    });
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Processing:** covering residue 1',
+        '- Chain <1..>264 [PRO_0000064301]: Catenin delta-2',
+        '**Residue 1 coverage:** processing 1 of 1 rows',
+      ]),
+    );
+  });
+
+  it('cuts every position-bearing section of the default record: O75339 residue 1 keeps only its signal', async () => {
+    const { out, entry } = await entryAt(
+      { accessions: ['O75339'], residue: 1 },
+      residueCoverageRow('O75339'),
+    );
+
+    expect(entry.processing?.map((f) => f.type)).toEqual(['Signal']);
+    expect(out.residueCoverage?.sections).toStrictEqual([
+      { section: 'processing', covered: 1, excluded: 0, total: 4 },
+    ]);
+  });
+
+  it('counts the O00533 chain with an UNKNOWN end as excluded, keeping the chain that spans residue 30', async () => {
+    const { out, entry, lines } = await entryAt(
+      { accessions: ['O00533'], residue: 30, sections: ['processing'] },
+      residueCoverageRow('O00533'),
+    );
+
+    expect(entry.processing).toStrictEqual([
+      {
+        type: 'Chain',
+        description: 'Neural cell adhesion molecule L1-like protein',
+        location: { start: 25, end: 1208 },
+        featureId: 'PRO_0000247896',
+      },
+    ]);
+    expect(out.residueCoverage?.sections).toStrictEqual([
+      { section: 'processing', covered: 1, excluded: 1, total: 3 },
+    ]);
+    expect(lines).toContain(
+      '**Residue 30 coverage:** processing 1 of 3 rows, 1 excluded (no canonical position)',
+    );
+  });
+
+  it('counts the O00139 phosphoserines numbered on O00139-4 as excluded, so residue 556 keeps no PTM', async () => {
+    const { out, entry, lines } = await entryAt(
+      { accessions: ['O00139'], residue: 556, sections: ['ptms'] },
+      residueCoverageRow('O00139'),
+    );
+
+    expect(entry).not.toHaveProperty('ptms');
+    expect(out.residueCoverage?.sections).toStrictEqual([
+      { section: 'ptms', covered: 0, excluded: 2, total: 9 },
+    ]);
+    expect(lines).toContain(
+      '**Residue 556 coverage:** ptms 0 of 9 rows, 2 excluded (no canonical position)',
+    );
+  });
+
+  it('cuts an on-request section: the O15294 mutagenesis row numbered on O15294-4 is excluded', async () => {
+    const { out, entry } = await entryAt(
+      { accessions: ['O15294'], residue: 10, sections: ['mutagenesis'] },
+      featureLocationRow('O15294'),
+    );
+
+    expect(entry).not.toHaveProperty('mutagenesis');
+    expect(out.residueCoverage?.sections).toStrictEqual([
+      { section: 'mutagenesis', covered: 0, excluded: 1, total: 1 },
+    ]);
+  });
+
+  it('lists no section when the named sections carry no position, and still checks the range', async () => {
+    const { out, lines } = await entryAt(
+      { accessions: ['O75339'], residue: 724, sections: ['keywords'] },
+      residueCoverageRow('O75339'),
+    );
+
+    expect(out.residueCoverage).toStrictEqual({ residue: 724, sections: [] });
+    expect(out.absentSections).toEqual(['keywords']);
+    expect(lines).toContain('**Residue 724 coverage:** no position-bearing section was filtered');
+
+    const past = await call(
+      { accessions: ['O75339'], residue: 1185, sections: ['keywords'] },
+      residueCoverageRow('O75339'),
+    );
+    expect(errorEnvelope(past.result).data).toMatchObject({ reason: 'residue_out_of_range' });
+  });
+
+  it('windows the covering rows, not the section: P04637 residue 175 pages its 7 variants 5 at a time', async () => {
+    const pages: (string | undefined)[][] = [];
+    let offset: number | undefined = 0;
+    // Bounded, so a nextOffset that never clears fails instead of hanging the suite.
+    while (offset !== undefined && pages.length < 3) {
+      const { out, entry } = await entryAt(
+        {
+          accessions: ['P04637'],
+          residue: 175,
+          sections: ['variants'],
+          section_limit: 5,
+          section_offset: offset,
+        },
+        p53,
+      );
+      expect(out.totalCount).toBe(7);
+      expect(out.residueCoverage?.sections).toStrictEqual([
+        { section: 'variants', covered: 7, excluded: 0, total: 1363 },
+      ]);
+      pages.push((entry.variants ?? []).map((v) => v.featureId));
+      offset = out.nextOffset as number | undefined;
+    }
+    expect(pages).toEqual([VARIANT_IDS_175.slice(0, 5), VARIANT_IDS_175.slice(5)]);
+  });
+
+  it('discloses the first window of covering rows on both surfaces, keeping residue in the paging guidance', async () => {
+    const { out, text, lines } = await entryAt(
+      { accessions: ['P04637'], residue: 175, sections: ['variants'], section_limit: 5 },
+      p53,
+    );
+
+    expect(out).toMatchObject({
+      kind: 'full',
+      window: { section: 'variants', offset: 0 },
+      residue: 175,
+      totalCount: 7,
+      truncated: true,
+      shown: 5,
+      cap: 5,
+      nextOffset: 5,
+    });
+    expect(out.notice).toContain(
+      '2 of 7 items in variants covering residue 175 remain. Re-call with section_offset:5 (same section_limit and residue) for the next window.',
+    );
+    expect(text).toContain(out.notice as string);
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Variants:** 5 natural variant(s) covering residue 175 in this window',
+        '**Next section_offset:** 5',
+        '**Residue 175 coverage:** variants 7 of 1363 rows',
+      ]),
+    );
+    expect(text).toContain('items 1–5');
+  });
+
+  it.each([7, 10])(
+    'returns an empty window at section_offset %i, past the 7 covering variants though the section holds 1,363',
+    async (offset) => {
+      const { out, entry, text } = await entryAt(
+        {
+          accessions: ['P04637'],
+          residue: 175,
+          sections: ['variants'],
+          section_limit: 5,
+          section_offset: offset,
+        },
+        p53,
+      );
+
+      expect(entry.variants).toEqual([]);
+      expect(out.totalCount).toBe(7);
+      expect(out).not.toHaveProperty('nextOffset');
+      expect(out).not.toHaveProperty('truncated');
+      expect(out.notice).toBe(
+        `section_offset ${offset} is past the end of variants, which holds 7 item(s) covering residue 175 — page with section_offset below 7, keeping residue.`,
+      );
+      expect(text).toContain(out.notice as string);
+      expect(text).toContain(`no items at section_offset ${offset}`);
+    },
+  );
+
+  it('windows a section the cut emptied to totalCount 0, with no paging notice', async () => {
+    const { out, entry } = await entryAt(
+      { accessions: ['P04637'], residue: 175, sections: ['sites'], section_limit: 5 },
+      p53,
+    );
+
+    expect(entry).not.toHaveProperty('sites');
+    expect(out.totalCount).toBe(0);
+    expect(out).not.toHaveProperty('notice');
+    expect(out).not.toHaveProperty('absentSections');
+    expect(out.residueCoverage?.sections).toStrictEqual([
+      { section: 'sites', covered: 0, excluded: 0, total: 5 },
+    ]);
+  });
+
+  it('inlines a record over budget whole once the cut fits: P04637 residue 175 without sections', async () => {
+    // The uncut record, its 1,363 variants included, outlines on its own.
+    const whole = await call({ accessions: ['P04637'] }, p53);
+    expect(whole.result.isError).toBeFalsy();
+    expect(whole.out.kind).toBe('outline');
+
+    const { result, out, lines } = await call({ accessions: ['P04637'], residue: 175 }, p53);
+    expect(result.isError).toBeFalsy();
+    expect(out.kind).toBe('full');
+    const entry = required(out.succeeded?.[0], 'the returned record');
+    expect(entry.variants).toStrictEqual(VARIANTS_175);
+    expect(entry.domains).toStrictEqual(DOMAINS_175);
+    expect(entry.processing).toStrictEqual([
+      {
+        type: 'Chain',
+        description: 'Cellular tumor antigen p53',
+        location: { start: 1, end: 393 },
+        featureId: 'PRO_0000185703',
+      },
+    ]);
+    expect(entry).not.toHaveProperty('sites');
+    expect(entry).not.toHaveProperty('ptms');
+    expect(out.residue).toBe(175);
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Variants:** 7 natural variant(s) covering residue 175',
+        '**Residue 175 coverage:** sites 0 of 5 rows; ptms 0 of 36 rows; processing 1 of 1 rows; variants 7 of 1363 rows; domains 6 of 26 rows',
+      ]),
+    );
+  });
+
+  it('outlines a cut record still over budget, sizing its covering rows and keeping residue in the re-call', async () => {
+    // P04637's comments and GO terms outweigh the budget on their own; one long comment stands in.
+    const heavy = {
+      ...p53,
+      comments: [{ commentType: 'MISCELLANEOUS', texts: [{ value: 'x'.repeat(30_000) }] }],
+    };
+    const { result, out, text, lines } = await call(
+      { accessions: ['P04637'], residue: 175 },
+      heavy,
+    );
+
+    expect(result.isError).toBeFalsy();
+    expect(out.kind).toBe('outline');
+    const sizes = new Map((out.sections ?? []).map((s) => [s.name, s.bytes]));
+    const chain = {
+      type: 'Chain',
+      description: 'Cellular tumor antigen p53',
+      location: { start: 1, end: 393 },
+      featureId: 'PRO_0000185703',
+    };
+    expect(sizes.get('variants')).toBe(bytes(VARIANTS_175));
+    expect(sizes.get('domains')).toBe(bytes(DOMAINS_175));
+    expect(sizes.get('processing')).toBe(bytes([chain]));
+    expect(sizes.has('sites')).toBe(false);
+    expect(sizes.has('ptms')).toBe(false);
+    expect(out.residue).toBe(175);
+    expect(out.residueCoverage).toStrictEqual({
+      residue: 175,
+      sections: [
+        { section: 'sites', covered: 0, excluded: 0, total: 5 },
+        { section: 'ptms', covered: 0, excluded: 0, total: 36 },
+        { section: 'processing', covered: 1, excluded: 0, total: 1 },
+        { section: 'variants', covered: 7, excluded: 0, total: 1363 },
+        { section: 'domains', covered: 6, excluded: 0, total: 26 },
+      ],
+    });
+    expect(out.notice).toBe(
+      'Re-call with accessions:["P04637"], residue:175, and sections:[...] to retrieve selected sections; use section_limit and section_offset for one list section.',
+    );
+    expect(text).toContain(out.notice as string);
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        'Position-bearing section sizes count only the rows covering residue 175.',
+        `- **variants** — ${bytes(VARIANTS_175)} bytes`,
+        '**Residue 175 coverage:** sites 0 of 5 rows; ptms 0 of 36 rows; processing 1 of 1 rows; variants 7 of 1363 rows; domains 6 of 26 rows',
+      ]),
+    );
+
+    // The same record without residue outlines every variant, and says nothing of a residue.
+    const whole = await call({ accessions: ['P04637'] }, heavy);
+    const wholeSizes = new Map((whole.out.sections ?? []).map((s) => [s.name, s.bytes]));
+    expect(wholeSizes.get('variants')).toBeGreaterThan(100 * bytes(VARIANTS_175));
+    expect(whole.out).not.toHaveProperty('residue');
+    expect(whole.out).not.toHaveProperty('residueCoverage');
+    expect(whole.text).not.toContain('residue');
+  });
+
+  it('returns a call without residue unchanged: no residue, no residueCoverage, unqualified headings', async () => {
+    const { out, entry, text, lines } = await entryAt(
+      { accessions: ['P04637'], sections: ['variants', 'domains'] },
+      p53,
+    );
+
+    expect(entry.variants).toHaveLength(1363);
+    expect(entry.domains).toHaveLength(26);
+    expect(out).not.toHaveProperty('residue');
+    expect(out).not.toHaveProperty('residueCoverage');
+    expect(lines).toEqual(
+      expect.arrayContaining(['**Variants:** 1363 natural variant(s)', '**Domains/regions:**']),
+    );
+    expect(text).not.toContain('covering residue');
+  });
+
+  it('accepts the last residue: P04637 residue 393 keeps the regions running to its C-terminus', async () => {
+    const { out, entry } = await entryAt(
+      { accessions: ['P04637'], residue: 393, sections: ['domains'] },
+      p53,
+    );
+
+    expect(entry.domains?.map((d) => d.description)).toEqual([
+      'Interaction with CARM1',
+      'Disordered',
+      'Interaction with MORN3',
+    ]);
+    expect(out.residueCoverage?.sections).toStrictEqual([
+      { section: 'domains', covered: 3, excluded: 0, total: 26 },
+    ]);
+  });
+
+  it('rejects a residue past the canonical length as residue_out_of_range, naming the length on both surfaces', async () => {
+    const { result } = await call(
+      { accessions: ['P04637'], residue: 394, sections: ['variants'] },
+      p53,
+    );
+
+    const envelope = errorEnvelope(result);
+    expect(envelope.code).toBe(JsonRpcErrorCode.ValidationError);
+    expect(envelope.message).toBe(
+      'residue 394 is past the end of P04637: its canonical sequence has 393 residues. Pass a residue from 1 to 393.',
+    );
+    expect(envelope.data).toMatchObject({
+      reason: 'residue_out_of_range',
+      residue: 394,
+      length: 393,
+      recovery: {
+        hint: 'Pass a residue from 1 to the length the message names, numbered on the canonical sequence.',
+      },
+    });
+    const text = contentText(result);
+    expect(text).toContain('its canonical sequence has 393 residues');
+    expect(text).toContain(
+      'Pass a residue from 1 to the length the message names, numbered on the canonical sequence.',
+    );
+    expect(text).toContain('(reason residue_out_of_range');
+  });
+
+  it.each([
+    ['two accessions', ['P04637', 'P38398']],
+    ['a repeated accession', ['P04637', 'P04637']],
+  ])(
+    'rejects residue with %s as residue_single_accession, before any request',
+    async (_case, accessions) => {
+      const result = await runToolContract(getEntry, { accessions, residue: 175 });
+
+      const envelope = errorEnvelope(result);
+      expect(envelope.code).toBe(JsonRpcErrorCode.ValidationError);
+      expect(envelope.message).toBe(
+        'residue cuts one record, but 2 accessions were passed. Re-call one accession at a time with residue.',
+      );
+      expect(envelope.data).toMatchObject({
+        reason: 'residue_single_accession',
+        recovery: {
+          hint: 'Re-call one accession at a time with residue, or drop residue for the batch.',
+        },
+      });
+      const text = contentText(result);
+      expect(text).toContain(
+        'Re-call one accession at a time with residue, or drop residue for the batch.',
+      );
+      expect(text).toContain('(reason residue_single_accession');
+      expect(text).not.toContain('sections');
+      expect(getEntriesMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it('checks sections first: a batch passing both fails sections_single_accession', async () => {
+    const result = await runToolContract(getEntry, {
+      accessions: ['P04637', 'P38398'],
+      residue: 175,
+      sections: ['variants'],
+    });
+    expect(errorEnvelope(result).data).toMatchObject({ reason: 'sections_single_accession' });
+    expect(getEntriesMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['residue 0', 0],
+    ['a negative residue', -1],
+    ['a fractional residue', 1.5],
+  ])('rejects %s at the schema edge', async (_case, residue) => {
+    const result = await runToolContract(getEntry, {
+      accessions: ['P04637'],
+      residue,
+    } as never);
+    const envelope = errorEnvelope(result);
+    expect(envelope.code).toBe(JsonRpcErrorCode.InvalidParams);
+    expect(envelope.data).toMatchObject({ reason: 'invalid_arguments' });
+    expect(getEntriesMock).not.toHaveBeenCalled();
+  });
+
+  it('fails an unknown accession with residue as all_not_found, before any range check', async () => {
+    const { result } = await call({ accessions: ['Q00000'], residue: 1 });
+    const envelope = errorEnvelope(result);
+    expect(envelope.code).toBe(JsonRpcErrorCode.NotFound);
+    expect(envelope.data).toMatchObject({ reason: 'all_not_found' });
+  });
+});
+
+describe('getEntry molecule, row evidence, and comment notes (#45, real service, through runToolContract)', () => {
+  const row = (accession: string) =>
+    required(
+      qualifiedComments.results.find((r) => r.primaryAccession === accession),
+      `the ${accession} fixture row`,
+    );
+  const p07477 = required(p07477Default.results[0], 'the P07477 fixture row');
+
+  type Out = {
+    kind: string;
+    succeeded: Entry[];
+    failed: unknown[];
+    window?: { section: string; offset: number };
+    totalCount?: number;
+    nextOffset?: number;
+  };
+
+  /** Run the tool through the real service, the batch search answering with these raw rows. */
+  async function call(input: Record<string, unknown>, ...rows: object[]) {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search' ? upstreamResponse(200, { results: rows }) : undefined,
+      ),
+    );
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+    const result = await runToolContract(getEntry, input as never);
+    expect(result.isError).toBeFalsy();
+    const text = contentText(result);
+    return { out: result.structuredContent as Out, text, lines: text.split('\n') };
+  }
+
+  const P04637_CYTOPLASM_EVIDENCE = [
+    'PubMed:15340061',
+    'PubMed:17170702',
+    'PubMed:19011621',
+    'PubMed:19033443',
+    'PubMed:21597459',
+    'PubMed:22726440',
+    'PubMed:22914926',
+    'PubMed:24625977',
+    'PubMed:26634371',
+  ];
+  const P04637_ZINC_EVIDENCE = [
+    'PubMed:14534297',
+    'PubMed:16793544',
+    'PubMed:17015838',
+    'PubMed:18650397',
+    'PubMed:19515728',
+    'PubMed:20142040',
+    'PubMed:20364130',
+  ];
+
+  it('renders rows with no molecule or evidence one per line, with no label or stray marks', async () => {
+    const { out, lines, text } = await call(
+      {
+        accessions: ['P07477'],
+        sections: ['catalyticActivity', 'cofactors', 'subcellularLocation'],
+      },
+      p07477,
+    );
+    expect(out.succeeded[0]?.cofactors).toEqual([{ name: 'Ca(2+)', chebiId: 'CHEBI:29108' }]);
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Catalytic activity:**',
+        '- Preferential cleavage: Arg-|-Xaa, Lys-|-Xaa. [EC 3.4.21.4]',
+        '**Cofactors:**',
+        '- Ca(2+) (CHEBI:29108)',
+        '**Subcellular location:**',
+        '- Secreted, extracellular space',
+      ]),
+    );
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('()');
+  });
+
+  it('returns each location’s molecule and evidence, and the location and cofactor notes as comments, on both surfaces', async () => {
+    const { out, lines } = await call(
+      { accessions: ['P04637'], sections: ['subcellularLocation', 'cofactors', 'comments'] },
+      row('P04637'),
+    );
+
+    const [entry] = out.succeeded;
+    const locations = entry?.subcellularLocation ?? [];
+    expect(locations).toHaveLength(19);
+    expect(locations[0]).toEqual({ location: 'Cytoplasm', evidence: P04637_CYTOPLASM_EVIDENCE });
+    expect(locations.filter((l) => !l.molecule).map((l) => l.evidence?.length)).toEqual([
+      9, 9, 3, 1, 3, 1,
+    ]);
+    expect(locations.filter((l) => l.molecule).map((l) => `${l.molecule}/${l.location}`)).toEqual([
+      'Isoform 1/Nucleus',
+      'Isoform 1/Cytoplasm',
+      'Isoform 2/Nucleus',
+      'Isoform 2/Cytoplasm',
+      'Isoform 3/Nucleus',
+      'Isoform 3/Cytoplasm',
+      'Isoform 4/Nucleus',
+      'Isoform 4/Cytoplasm',
+      'Isoform 7/Nucleus',
+      'Isoform 7/Cytoplasm',
+      'Isoform 8/Nucleus',
+      'Isoform 8/Cytoplasm',
+      'Isoform 9/Cytoplasm',
+    ]);
+    expect(entry?.cofactors).toEqual([
+      { name: 'Zn(2+)', chebiId: 'CHEBI:29105', evidence: P04637_ZINC_EVIDENCE },
+    ]);
+    const isoform4Note =
+      'Predominantly nuclear but translocates to the cytoplasm following cell stress';
+    expect(entry?.comments?.map((c) => c.type)).toEqual([
+      'COFACTOR',
+      ...Array(7).fill('SUBCELLULAR LOCATION'),
+    ]);
+    expect(entry?.comments?.[0]).toEqual({
+      type: 'COFACTOR',
+      value: 'Binds 1 zinc ion per subunit.',
+      evidence: P04637_ZINC_EVIDENCE,
+    });
+    expect(entry?.comments?.[1]?.evidence).toEqual([
+      'PubMed:12810724',
+      'PubMed:22726440',
+      'PubMed:24625977',
+      'PubMed:27323408',
+    ]);
+    expect(entry?.comments?.[5]).toEqual({
+      type: 'SUBCELLULAR LOCATION',
+      value: isoform4Note,
+      molecule: 'Isoform 4',
+    });
+
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Subcellular location:**',
+        `- Cytoplasm (${P04637_CYTOPLASM_EVIDENCE.join(', ')})`,
+        '- Nucleus, PML body (PubMed:11025664, PubMed:12810724, PubMed:36108750)',
+        '- Isoform 1: Nucleus (PubMed:23752197)',
+        '- Isoform 1: Cytoplasm',
+        '- Isoform 9: Cytoplasm',
+        '**Cofactors:**',
+        `- Zn(2+) (CHEBI:29105) (${P04637_ZINC_EVIDENCE.join(', ')})`,
+        `- COFACTOR: Binds 1 zinc ion per subunit. (${P04637_ZINC_EVIDENCE.join(', ')})`,
+        `- SUBCELLULAR LOCATION (Isoform 4): ${isoform4Note}`,
+      ]),
+    );
+    expect(lines.filter((line) => line.startsWith('- Isoform '))).toHaveLength(13);
+    expect(lines.filter((line) => line.startsWith('- SUBCELLULAR LOCATION'))).toHaveLength(7);
+  });
+
+  it('windows a molecule-qualified section so each windowed row still names its isoform', async () => {
+    const { out, lines, text } = await call(
+      {
+        accessions: ['P04637'],
+        sections: ['subcellularLocation'],
+        section_limit: 2,
+        section_offset: 6,
+      },
+      row('P04637'),
+    );
+    expect(out.succeeded[0]?.subcellularLocation).toEqual([
+      { location: 'Nucleus', evidence: ['PubMed:23752197'], molecule: 'Isoform 1' },
+      { location: 'Cytoplasm', molecule: 'Isoform 1' },
+    ]);
+    expect(out.totalCount).toBe(19);
+    expect(out.nextOffset).toBe(8);
+    expect(text).toContain('**Window:** `subcellularLocation` items 7–8 (section_offset 6)');
+    expect(lines).toEqual(
+      expect.arrayContaining(['- Isoform 1: Nucleus (PubMed:23752197)', '- Isoform 1: Cytoplasm']),
+    );
+    expect(text).not.toContain(P04637_CYTOPLASM_EVIDENCE.join(', '));
+  });
+
+  it('returns each FUNCTION text’s and each reaction’s molecule and evidence on both surfaces', async () => {
+    const { out, lines } = await call(
+      { accessions: ['O14975'], sections: ['function', 'catalyticActivity'] },
+      row('O14975'),
+    );
+
+    const [entry] = out.succeeded;
+    expect(entry?.function?.map((f) => f.molecule)).toEqual([undefined, 'Isoform 1', 'Isoform 2']);
+    const reactions = entry?.catalyticActivity ?? [];
+    expect(reactions.filter((r) => r.molecule === 'Isoform 1')).toHaveLength(13);
+    expect(reactions.filter((r) => r.molecule === 'Isoform 2').map((r) => r.rheaId)).toEqual([
+      'RHEA:38879',
+    ]);
+    expect(reactions.find((r) => r.rheaId === 'RHEA:36139')).toEqual({
+      name: '(E)-hexadec-2-enoate + ATP + CoA = (2E)-hexadecenoyl-CoA + AMP + diphosphate',
+      rheaId: 'RHEA:36139',
+      evidence: ['PubMed:24269233'],
+    });
+
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '**Function:**',
+        '- Isoform 2: Exhibits long-chain fatty acids (LCFA) transport activity but lacks acyl CoA synthetase towards very long-chain fatty acids (PubMed:21768100)',
+        '**Catalytic activity:**',
+        '- Isoform 2: a fatty acid(in) = a fatty acid(out) (RHEA:38879) (PubMed:21768100)',
+        '- Isoform 1: a long-chain fatty acid + ATP + CoA = a long-chain fatty acyl-CoA + AMP + diphosphate (RHEA:15421) [EC 6.2.1.3] (PubMed:10198260, PubMed:10749848, PubMed:11980911, PubMed:22022213, PubMed:20530735)',
+        '- (E)-hexadec-2-enoate + ATP + CoA = (2E)-hexadecenoyl-CoA + AMP + diphosphate (RHEA:36139) (PubMed:24269233)',
+      ]),
+    );
+    // 13 reactions and 1 FUNCTION text are about Isoform 1.
+    expect(lines.filter((line) => line.startsWith('- Isoform 1: '))).toHaveLength(14);
+  });
+
+  it('returns function, reaction, and cofactor rows with their molecule and evidence across a batch, and a cofactor note as a comment', async () => {
+    const { out, lines } = await call(
+      { accessions: ['P68871', 'P00751', 'P00918', 'P19367'] },
+      row('P68871'),
+      row('P00751'),
+      row('P00918'),
+      row('P19367'),
+    );
+
+    expect(out.kind).toBe('full');
+    const [hbb, cfb, ca2, hk1] = out.succeeded;
+    expect(hbb?.function?.map((f) => f.molecule)).toEqual([undefined, undefined, 'Spinorphin']);
+    expect(cfb?.cofactors?.map((c) => c.molecule)).toEqual([
+      'Complement factor B Bb',
+      'Complement factor B Bb',
+    ]);
+    // The 22 evidences P00918's Zn(2+) cofactor carries in the fixture, in UniProt order.
+    const zincEvidence = [
+      '11076507',
+      '12499545',
+      '1336460',
+      '1433293',
+      '1909891',
+      '19583303',
+      '3151019',
+      '3151020',
+      '7761440',
+      '7803386',
+      '7901850',
+      '8218160',
+      '8262987',
+      '8331673',
+      '8399159',
+      '8431430',
+      '8451242',
+      '8482389',
+      '8639494',
+      '8987974',
+      '9398308',
+      '9865942',
+    ].map((id) => `PubMed:${id}`);
+    expect(ca2?.cofactors?.[0]?.evidence).toEqual(zincEvidence);
+    expect(ca2?.comments).toEqual([
+      {
+        type: 'COFACTOR',
+        value:
+          'Zinc. Can also use cobalt(II) with lower efficiency, but not copper(II), nickel(II) and manganese(II).',
+        evidence: ['PubMed:19583303'],
+      },
+    ]);
+    expect(hk1?.catalyticActivity?.[1]).toEqual({
+      name: 'D-fructose + ATP = D-fructose 6-phosphate + ADP + H(+)',
+      ecNumber: '2.7.1.1',
+      rheaId: 'RHEA:16125',
+      evidence: ['UniProtKB:P05708'],
+    });
+
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '- Involved in oxygen transport from the lung to the various peripheral tissues (PubMed:28066926)',
+        '- LVV-hemorphin-7 potentiates the activity of bradykinin, causing a decrease in blood pressure',
+        '- Spinorphin: Functions as an endogenous inhibitor of enkephalin-degrading enzymes such as DPP3, and as a selective antagonist of the P2RX3 receptor which is involved in pain signaling, these properties implicate it as a regulator of pain and inflammation',
+        '- Complement factor B Bb: Mg(2+) (CHEBI:18420) (PubMed:15068800, PubMed:19503103, PubMed:19574954, PubMed:21205667, PubMed:3638964)',
+        '- Complement factor B Bb: Mn(2+) (CHEBI:29035) (PubMed:15016353)',
+        `- Zn(2+) (CHEBI:29105) (${zincEvidence.join(', ')})`,
+        '- Co(2+) (CHEBI:48828) (PubMed:19583303)',
+        '- COFACTOR: Zinc. Can also use cobalt(II) with lower efficiency, but not copper(II), nickel(II) and manganese(II). (PubMed:19583303)',
+        '- a D-hexose + ATP = a D-hexose 6-phosphate + ADP + H(+) (RHEA:22740) [EC 2.7.1.1] (PubMed:1637300, PubMed:27374331)',
+        '- D-fructose + ATP = D-fructose 6-phosphate + ADP + H(+) (RHEA:16125) [EC 2.7.1.1] (UniProtKB:P05708)',
+      ]),
+    );
+  });
+});
+
+describe('getEntry location orientation, alternative-products notes, and isoform synonyms (real service, through runToolContract)', () => {
+  const row = (accession: string) =>
+    required(
+      qualifiedComments.results.find((r) => r.primaryAccession === accession),
+      `the ${accession} fixture row`,
+    );
+
+  it('returns a location’s orientation, the ALTERNATIVE PRODUCTS note, and isoform synonyms on both surfaces', async () => {
+    vi.stubGlobal(
+      'fetch',
+      routeUpstream((url) =>
+        url.pathname === '/uniprotkb/search'
+          ? upstreamResponse(200, { results: [row('O00165'), row('B3KU38')] })
+          : undefined,
+      ),
+    );
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+
+    const result = await runToolContract(getEntry, { accessions: ['O00165', 'B3KU38'] });
+
+    expect(result.isError).toBeFalsy();
+    const out = result.structuredContent as { kind: string; succeeded: Entry[] };
+    const [pex, schip] = out.succeeded;
+    expect(pex?.subcellularLocation?.find((l) => l.orientation)).toEqual({
+      location: 'Cell membrane',
+      topology: 'Peripheral membrane protein',
+      orientation: 'Cytoplasmic side',
+      evidence: ['PubMed:26997484'],
+    });
+    expect(pex?.comments?.at(-1)).toEqual({
+      type: 'ALTERNATIVE PRODUCTS',
+      value: 'Additional isoforms seem to exist.',
+    });
+    expect(schip?.isoforms?.[2]).toEqual({
+      isoformId: 'P0DPB3-1',
+      name: 'SCHIP1-1',
+      synonyms: ['SCHIP-1', 'SCHIP-1a'],
+      sequenceStatus: 'External',
+    });
+
+    const lines = contentText(result).split('\n');
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        '- Cell membrane (Peripheral membrane protein; Cytoplasmic side) (PubMed:26997484)',
+        '- Cytoplasm, P-body (PubMed:23164465)',
+        '- ALTERNATIVE PRODUCTS: Additional isoforms seem to exist.',
+        '**Isoforms:** B3KU38-1 (IQCJ-SCHIP1-1) [Displayed], B3KU38-2 (IQCJ-SCHIP1-2) [Described], P0DPB3-1 (SCHIP1-1; synonyms SCHIP-1, SCHIP-1a) [External], P0DPB3-2 (SCHIP1-2; synonyms SCHIP-1-D241/253) [External], P0DPB3-3 (SCHIP1-3; synonyms SCHIP-1-D22/253) [External], P0DPB3-4 (SCHIP1-4) [External], Q1A5X6-1 (IQCJ-1) [External], Q1A5X6-2 (IQCJ-2) [External], Q1A5X6-3 (IQCJ-3) [External]',
+      ]),
+    );
+  });
+});
+
+/**
+ * The biophysicochemical section (#47) over `biophysicochemical.json`, rows captured from
+ * rest.uniprot.org with the identity and BIOPHYSICOCHEMICAL PROPERTIES fields. The normalized
+ * values are tabled in the service test; these prove the schema, the default projection,
+ * sections, windows, outlines, and the content[] rendering of every value with its evidence.
+ */
+describe('getEntry biophysicochemical properties (#47, real service over captured rows, through runToolContract)', () => {
+  const row = (accession: string) =>
+    required(
+      biophysicochemicalRows.results.find((r) => r.primaryAccession === accession),
+      `the ${accession} fixture row`,
+    );
+  const IDENTITY_FIELDS =
+    'accession,id,protein_name,gene_names,organism_name,organism_id,length,reviewed,annotation_score,protein_existence';
+  const HEADER = '**Biophysicochemical properties:**';
+
+  type Out = {
+    kind: string;
+    succeeded: Entry[];
+    failed: unknown[];
+    sections?: { name: string; bytes: number }[];
+    window?: { section: string; offset: number };
+    totalCount?: number;
+    nextOffset?: number;
+    absentSections?: string[];
+    ignoredFields?: string[];
+    notice?: string;
+  };
+
+  /** Run the tool through the real service, the batch search answering with these raw rows. */
+  async function call(input: Record<string, unknown>, ...rows: object[]) {
+    const fetchStub = routeUpstream((url) =>
+      url.pathname === '/uniprotkb/search' ? upstreamResponse(200, { results: rows }) : undefined,
+    );
+    vi.stubGlobal('fetch', fetchStub);
+    getEntriesMock.mockImplementation(realService.getEntries.bind(realService));
+    const result = await runToolContract(getEntry, input as never);
+    expect(result.isError).toBeFalsy();
+    const text = contentText(result);
+    const sentFields = requestedUrls(fetchStub)[0]?.searchParams.get('fields') ?? undefined;
+    return { out: result.structuredContent as Out, text, lines: text.split('\n'), sentFields };
+  }
+
+  /** The biophysicochemical block of the entry whose rendering starts at `from`: its header and its rows. */
+  function block(lines: string[], from = 0): string[] {
+    const start = lines.indexOf(HEADER, from);
+    expect(start).toBeGreaterThanOrEqual(0);
+    let end = start + 1;
+    while (lines[end]?.startsWith('- ')) end++;
+    return lines.slice(start, end);
+  }
+
+  it('returns P00918’s five KM rows and its pH text, each with its evidence, on both surfaces', async () => {
+    const { out, lines, text } = await call(
+      { accessions: ['P00918'], sections: ['biophysicochemical'] },
+      row('P00918'),
+    );
+
+    expect(out.kind).toBe('full');
+    const [ca2] = out.succeeded;
+    expect(ca2?.biophysicochemical).toHaveLength(1);
+    const [only] = ca2?.biophysicochemical ?? [];
+    expect(only?.michaelisConstants?.map((k) => [k.constant, k.unit, k.substrate])).toEqual([
+      [9.3, 'mM', 'CO(2)'],
+      [11, 'mM', 'CO(2)'],
+      [8.2, 'mM', 'CO(2)'],
+      [82, 'mM', 'H(2)CO(3)'],
+      [2.9, 'mM', '4-nitrophenyl acetate'],
+    ]);
+    expect(only?.michaelisConstants?.[0]?.evidence).toEqual(['PubMed:4994926', 'PubMed:7761440']);
+    expect(only?.phDependence?.[0]?.evidence).toHaveLength(5);
+
+    expect(block(lines)).toEqual([
+      HEADER,
+      '- KM=9.3 mM for CO(2) (PubMed:4994926, PubMed:7761440)',
+      '- KM=11 mM for CO(2) (PubMed:1909891)',
+      '- KM=8.2 mM for CO(2) (PubMed:9398308)',
+      '- KM=82 mM for H(2)CO(3) (PubMed:8262987)',
+      '- KM=2.9 mM for 4-nitrophenyl acetate (PubMed:10550681)',
+      '- pH dependence: Optimum pH is 6-8. (PubMed:15667203, PubMed:17330962, PubMed:18942852, PubMed:8262987, PubMed:9398308)',
+    ]);
+    expect(text).not.toContain('undefined');
+  });
+
+  it('fetches the five names in the default record and renders A9WGE2’s whole comment inline', async () => {
+    const { out, lines, sentFields } = await call({ accessions: ['A9WGE2'] }, row('A9WGE2'));
+
+    // The default projection carries the five names, after the cofactor field.
+    expect(sentFields).toContain(
+      'cc_cofactor,kinetics,ph_dependence,temp_dependence,redox_potential,absorption,',
+    );
+    expect(out.kind).toBe('full');
+    expect(out.succeeded[0]?.biophysicochemical?.[0]?.absorption).toEqual({
+      maxNm: 280,
+      evidence: ['PubMed:17259315'],
+    });
+    expect(block(lines)).toEqual([
+      HEADER,
+      '- KM=70 uM for (R)-citramalyl-CoA (PubMed:17259315)',
+      '- Kinetics note: kcat is 1.7 sec(-1) for lyase activity with (R)-citramalyl-CoA as substrate.',
+      '- pH dependence: Optimum pH is 7 (at 55 degrees Celsius). (PubMed:17259315)',
+      '- Temperature dependence: Optimum temperature is 55 degrees Celsius. (PubMed:17259315)',
+      '- Absorption: Abs(max)=280 nm (PubMed:17259315)',
+    ]);
+  });
+
+  it('renders a Vmax row, a redox potential, and an approximate absorption with its note across a batch', async () => {
+    const { out, lines } = await call(
+      { accessions: ['O14975', 'Q96JJ7', 'Q9SYW8'] },
+      row('O14975'),
+      row('Q96JJ7'),
+      row('Q9SYW8'),
+    );
+
+    expect(out.kind).toBe('full');
+    const [fatp2, tmx3, lhca2] = out.succeeded;
+    expect(fatp2?.biophysicochemical?.[0]?.maximumVelocities).toEqual([
+      {
+        velocity: 1.4,
+        unit: 'nmol/min/mg',
+        enzyme: 'enzyme for hexadecanoyl-CoA (palmitoyl-CoA) synthesis',
+        evidence: ['PubMed:11980911'],
+      },
+    ]);
+    expect(tmx3?.biophysicochemical).toEqual([
+      { redoxPotential: [{ value: 'E(0) is -157 mV.', evidence: ['PubMed:15623505'] }] },
+    ]);
+    expect(lhca2?.biophysicochemical).toEqual([
+      {
+        absorption: { maxNm: 695, approximate: true },
+        absorptionNote: [{ value: 'Emission maxima at 702 nm.', evidence: ['PubMed:11553743'] }],
+      },
+    ]);
+
+    const fatp2At = lines.indexOf('# Long-chain fatty acid transport protein 2 (O14975)');
+    const tmx3At = lines.findIndex((line) => line.endsWith('(Q96JJ7)'));
+    const lhca2At = lines.findIndex((line) => line.endsWith('(Q9SYW8)'));
+    expect(block(lines, fatp2At)).toEqual([
+      HEADER,
+      '- KM=12 uM for hexadecanoate (palmitate) (PubMed:11980911)',
+      '- Vmax=1.4 nmol/min/mg enzyme for hexadecanoyl-CoA (palmitoyl-CoA) synthesis (PubMed:11980911)',
+    ]);
+    expect(block(lines, tmx3At)).toEqual([
+      HEADER,
+      '- Redox potential: E(0) is -157 mV. (PubMed:15623505)',
+    ]);
+    expect(block(lines, lhca2At)).toEqual([
+      HEADER,
+      '- Absorption: Abs(max)=695 nm (approximate)',
+      '- Absorption note: Emission maxima at 702 nm. (PubMed:11553743)',
+    ]);
+  });
+
+  it('renders both texts of every text part, each with its own evidence, on both surfaces', async () => {
+    const { out, lines } = await call(
+      { accessions: ['P00000'], sections: ['biophysicochemical'] },
+      TWO_TEXT_BIOPHYSICOCHEMICAL_ROW,
+    );
+
+    expect(out.kind).toBe('full');
+    const [only] = out.succeeded[0]?.biophysicochemical ?? [];
+    expect(
+      [
+        only?.kineticsNote,
+        only?.phDependence,
+        only?.temperatureDependence,
+        only?.redoxPotential,
+        only?.absorptionNote,
+      ].map((part) => part?.map((t) => [t.value, t.evidence])),
+    ).toEqual([
+      [
+        ['kcat is 1.7 sec(-1) for lyase activity with (R)-citramalyl-CoA as substrate.', undefined],
+        ['kcat is 390 sec(-1) for NAD(+).', ['PubMed:7852410']],
+      ],
+      [
+        ['Optimum pH is 6.5.', ['PubMed:6246102']],
+        ['Optimum pH is 7 (at 55 degrees Celsius).', ['PubMed:17259315']],
+      ],
+      [
+        ['Thermostable.', ['PubMed:37708259']],
+        ['Optimum temperature is 45 degrees Celsius.', ['PubMed:29326945']],
+      ],
+      [
+        ['E(0) is -157 mV.', ['PubMed:15623505']],
+        ['E is 0 +/- 10 mV for 2Fe-2S at pH 7.5.', ['PubMed:19580816']],
+      ],
+      [
+        ['Emission maxima at 702 nm.', ['PubMed:11553743']],
+        ['Shoulder at 335 nm (at pH 7.5 and 30 degrees Celsius).', ['PubMed:22547782']],
+      ],
+    ]);
+    expect(block(lines)).toEqual([
+      HEADER,
+      '- Kinetics note: kcat is 1.7 sec(-1) for lyase activity with (R)-citramalyl-CoA as substrate.',
+      '- Kinetics note: kcat is 390 sec(-1) for NAD(+). (PubMed:7852410)',
+      '- pH dependence: Optimum pH is 6.5. (PubMed:6246102)',
+      '- pH dependence: Optimum pH is 7 (at 55 degrees Celsius). (PubMed:17259315)',
+      '- Temperature dependence: Thermostable. (PubMed:37708259)',
+      '- Temperature dependence: Optimum temperature is 45 degrees Celsius. (PubMed:29326945)',
+      '- Redox potential: E(0) is -157 mV. (PubMed:15623505)',
+      '- Redox potential: E is 0 +/- 10 mV for 2Fe-2S at pH 7.5. (PubMed:19580816)',
+      '- Absorption: Abs(max)=695 nm (approximate)',
+      '- Absorption note: Emission maxima at 702 nm. (PubMed:11553743)',
+      '- Absorption note: Shoulder at 335 nm (at pH 7.5 and 30 degrees Celsius). (PubMed:22547782)',
+    ]);
+  });
+
+  it('labels each of Q07343’s four isoform objects on its rows', async () => {
+    const { out, lines } = await call(
+      { accessions: ['Q07343'], sections: ['biophysicochemical'] },
+      row('Q07343'),
+    );
+    expect(out.succeeded[0]?.biophysicochemical?.map((b) => b.molecule)).toEqual([
+      'Isoform PDE4B2',
+      'Isoform PDE4B1',
+      'Isoform PDE4B3',
+      'Isoform PDE4B5',
+    ]);
+    expect(block(lines)).toEqual([
+      HEADER,
+      "- Isoform PDE4B2: KM=15 uM for 3',5'-cyclic AMP (PubMed:8392015)",
+      "- Isoform PDE4B2: KM=2.6 uM for 3',5'-cyclic AMP (PubMed:8392015)",
+      "- Isoform PDE4B1: KM=2 uM for 3',5'-cyclic AMP (PubMed:8392015)",
+      "- Isoform PDE4B3: KM=1.5 uM for 3',5'-cyclic AMP (PubMed:8392015)",
+      "- Isoform PDE4B5: KM=5.8 uM for 3',5'-cyclic AMP (PubMed:17519386)",
+    ]);
+  });
+
+  it('windows P55263 by comment: section_limit 1, section_offset 1 returns the Isoform 1 object', async () => {
+    const { out, lines, text } = await call(
+      {
+        accessions: ['P55263'],
+        sections: ['biophysicochemical'],
+        section_limit: 1,
+        section_offset: 1,
+      },
+      row('P55263'),
+    );
+
+    expect(out.succeeded[0]?.biophysicochemical).toEqual([
+      {
+        molecule: 'Isoform 1',
+        michaelisConstants: [
+          { constant: 41, unit: 'nM', substrate: 'adenosine', evidence: ['PubMed:8577746'] },
+          { constant: 0.13, unit: 'uM', substrate: 'ATP', evidence: ['PubMed:9070863'] },
+        ],
+      },
+    ]);
+    expect(out.window).toEqual({ section: 'biophysicochemical', offset: 1 });
+    expect(out.totalCount).toBe(3);
+    expect(out.nextOffset).toBe(2);
+    expect(text).toContain('**Window:** `biophysicochemical` items 2–2 (section_offset 1)');
+    expect(block(lines)).toEqual([
+      HEADER,
+      '- Isoform 1: KM=41 nM for adenosine (PubMed:8577746)',
+      '- Isoform 1: KM=0.13 uM for ATP (PubMed:9070863)',
+    ]);
+    expect(text).not.toContain('Optimum pH is 6.5.');
+  });
+
+  it('walks P55263’s three objects one window at a time, then answers an offset past the end', async () => {
+    const pages: (string | undefined)[][] = [];
+    let offset: number | undefined = 0;
+    // Three objects at one per window: the walk ends on its third page.
+    for (let page = 0; page < 4 && offset !== undefined; page++) {
+      const { out } = await call(
+        {
+          accessions: ['P55263'],
+          sections: ['biophysicochemical'],
+          section_limit: 1,
+          section_offset: offset,
+        },
+        row('P55263'),
+      );
+      expect(out.totalCount).toBe(3);
+      pages.push((out.succeeded[0]?.biophysicochemical ?? []).map((b) => b.molecule));
+      offset = out.nextOffset;
+    }
+    expect(offset).toBeUndefined();
+    expect(pages).toEqual([[undefined], ['Isoform 1'], ['Isoform 2']]);
+
+    const past = await call(
+      {
+        accessions: ['P55263'],
+        sections: ['biophysicochemical'],
+        section_limit: 1,
+        section_offset: 3,
+      },
+      row('P55263'),
+    );
+    expect(past.out.succeeded[0]?.biophysicochemical).toEqual([]);
+    expect(past.out.totalCount).toBe(3);
+    expect(past.out.notice).toContain(
+      'section_offset 3 is past the end of biophysicochemical, which holds 3 item(s)',
+    );
+    expect(past.text).toContain('**Window:** `biophysicochemical` — no items at section_offset 3');
+    expect(past.lines).not.toContain(HEADER);
+  });
+
+  it('fetches the whole comment for fields:"accession,kinetics", ignoring nothing', async () => {
+    const { out, text, sentFields } = await call(
+      { accessions: ['P00918'], fields: 'accession,kinetics' },
+      row('P00918'),
+    );
+    expect(sentFields).toBe(`${IDENTITY_FIELDS},kinetics`);
+    expect(out).not.toHaveProperty('ignoredFields');
+    expect(text).not.toContain('Ignored fields');
+    const [only] = out.succeeded[0]?.biophysicochemical ?? [];
+    expect(only?.michaelisConstants).toHaveLength(5);
+    expect(only?.phDependence?.[0]?.value).toBe('Optimum pH is 6-8.');
+  });
+
+  it('omits the section from P04637, which has none, and names it in absentSections when requested', async () => {
+    const full = await call({ accessions: ['P04637'] }, RAW_ENTRIES.p53);
+    expect(full.out.kind).toBe('full');
+    expect(full.out.succeeded[0]).not.toHaveProperty('biophysicochemical');
+    expect(full.lines).not.toContain(HEADER);
+
+    const named = await call(
+      { accessions: ['P04637'], sections: ['biophysicochemical'] },
+      RAW_ENTRIES.p53,
+    );
+    expect(named.out.absentSections).toEqual(['biophysicochemical']);
+    expect(named.out.succeeded[0]).not.toHaveProperty('biophysicochemical');
+    expect(named.text).toMatch(/\*\*Absent sections:\*\* biophysicochemical — /);
+  });
+
+  it('outlines Q29550’s default record, which the section carries past the budget, listing its byte size on both surfaces', async () => {
+    // The Q29550 row is the default projection whole: FUNCTION, CATALYTIC ACTIVITY, and location
+    // comments, features, keywords, and cross-references beside its one large comment.
+    const { out, lines } = await call({ accessions: ['Q29550'] }, row('Q29550'));
+    expect(out.kind).toBe('outline');
+
+    const recall = await call(
+      { accessions: ['Q29550'], sections: ['biophysicochemical'] },
+      row('Q29550'),
+    );
+    const bytes = Buffer.byteLength(
+      JSON.stringify(recall.out.succeeded[0]?.biophysicochemical),
+      'utf8',
+    );
+    expect(out.sections?.[0]).toEqual({ name: 'biophysicochemical', bytes });
+    expect(lines).toContain(`- **biophysicochemical** — ${bytes} bytes`);
+  });
+
+  it('returns Q29550’s whole comment, 39 KM and 38 Vmax rows, on a sections re-call', async () => {
+    const { out, lines } = await call(
+      { accessions: ['Q29550'], sections: ['biophysicochemical'] },
+      row('Q29550'),
+    );
+    expect(out.kind).toBe('full');
+    expect(out.succeeded[0]).not.toHaveProperty('function');
+    const [only] = out.succeeded[0]?.biophysicochemical ?? [];
+    expect(only?.michaelisConstants).toHaveLength(39);
+    expect(only?.maximumVelocities).toHaveLength(38);
+    const rows = block(lines);
+    expect(rows.filter((line) => line.startsWith('- KM='))).toHaveLength(39);
+    expect(rows.filter((line) => line.startsWith('- Vmax='))).toHaveLength(38);
+    expect(rows).toContain(
+      '- Vmax=0.03 nmol/min/ug enzyme with CPT-11 as substrate (PubMed:16223870, PubMed:9490062, PubMed:9799112)',
+    );
+    expect(rows.at(-1)).toBe(
+      '- pH dependence: Optimum pH is 8.0 with tributylglycerol as substrate, and 8.2 with retinyl palmitate as substrate. Active from pH 4.5-9.5 with retinyl palmitate as substrate. (PubMed:16223870, PubMed:9490062, PubMed:9799112)',
+    );
+  });
+
+  it('renders a sparse comment whole: no row evidence, no maximum, a molecule, a lone temperature text', async () => {
+    const { out, lines, text } = await call(
+      { accessions: ['P00000'], sections: ['biophysicochemical'] },
+      {
+        ...activeRawEntry('P00000', 'TEST_HUMAN'),
+        comments: [
+          {
+            commentType: 'BIOPHYSICOCHEMICAL PROPERTIES',
+            molecule: 'Isoform 2',
+            kineticParameters: {
+              michaelisConstants: [{ constant: 1.97e-8, unit: 'M', substrate: 'X' }],
+              maximumVelocities: [{ velocity: 0, unit: 'umol/min/mg', enzyme: 'enzyme toward X' }],
+            },
+            absorption: {
+              approximate: false,
+              evidences: [{ evidenceCode: 'ECO:0000269', source: 'PubMed', id: '3' }],
+              note: { texts: [{ value: 'Broad band.' }] },
+            },
+          },
+          {
+            commentType: 'BIOPHYSICOCHEMICAL PROPERTIES',
+            temperatureDependence: { texts: [{ value: 'Thermostable.' }] },
+            absorption: { approximate: false, note: { texts: [{ value: 'Note only.' }] } },
+          },
+        ],
+      },
+    );
+    expect(out.succeeded[0]?.biophysicochemical).toEqual([
+      {
+        molecule: 'Isoform 2',
+        michaelisConstants: [{ constant: 1.97e-8, unit: 'M', substrate: 'X' }],
+        maximumVelocities: [{ velocity: 0, unit: 'umol/min/mg', enzyme: 'enzyme toward X' }],
+        absorption: { evidence: ['PubMed:3'] },
+        absorptionNote: [{ value: 'Broad band.' }],
+      },
+      {
+        temperatureDependence: [{ value: 'Thermostable.' }],
+        absorptionNote: [{ value: 'Note only.' }],
+      },
+    ]);
+    expect(block(lines)).toEqual([
+      HEADER,
+      '- Isoform 2: KM=1.97e-8 M for X',
+      '- Isoform 2: Vmax=0 umol/min/mg enzyme toward X',
+      '- Isoform 2: Absorption (PubMed:3)',
+      '- Isoform 2: Absorption note: Broad band.',
+      '- Temperature dependence: Thermostable.',
+      '- Absorption note: Note only.',
+    ]);
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('()');
   });
 });
 
@@ -1819,7 +3515,7 @@ describe('getEntry return fields (#34, real service, through runToolContract)', 
     expect(out).not.toHaveProperty('notice');
     const text = contentText(result);
     expect(text.split('\n')).toEqual(
-      expect.arrayContaining(['- Disulfide bond @30-160', '- `AlphaFoldDB`: `P07477`']),
+      expect.arrayContaining(['- Disulfide bond @30..160', '- `AlphaFoldDB`: `P07477`']),
     );
     expect(text).not.toContain('Ignored fields');
   });
@@ -1840,7 +3536,7 @@ describe('getEntry return fields (#34, real service, through runToolContract)', 
     expect(out.succeeded[0]?.domains).toEqual([
       { type: 'DNA binding', location: { start: 102, end: 292 } },
     ]);
-    expect(contentText(result).split('\n')).toContain('- DNA binding 102-292');
+    expect(contentText(result).split('\n')).toContain('- DNA binding 102..292');
   });
 
   it('lists P0A7V8’s ordered-locus names among its genes', async () => {
@@ -2271,6 +3967,8 @@ describe('getEntry #35 sections (real service over captured rows, through runToo
     'Occurs in a single-chain form and a two-chain form, produced by proteolytic cleavage after Arg-122';
   const PTM_SULFATION =
     "Sulfation at Tyr-154 increases selectivity towards basic versus apolar residues at the P2' position of inhibitors that bind in a substrate-like fashion. Although the increase in selectivity is relatively small, it may facilitate digestion of a broader range of dietary proteins";
+  /** P07477's COFACTOR comment note, filed under comments ahead of SUBUNIT in UniProt's comment order. */
+  const COFACTOR_NOTE = 'Binds 1 Ca(2+) ion per subunit.';
 
   type Out = {
     kind: string;
@@ -2375,6 +4073,7 @@ describe('getEntry #35 sections (real service over captured rows, through runToo
       'Trypsin-1',
     ]);
     expect(entry?.comments).toEqual([
+      { type: 'COFACTOR', value: COFACTOR_NOTE },
       { type: 'SUBUNIT', value: 'Interacts with SERPINA1', evidence: ['PubMed:11057674'] },
       { type: 'PTM', value: PTM_CLEAVAGE },
       { type: 'PTM', value: PTM_SULFATION, evidence: ['PubMed:25010489'] },
@@ -2395,12 +4094,13 @@ describe('getEntry #35 sections (real service over captured rows, through runToo
         '- Binding site 85 — Ca(2+) (CHEBI:29108)',
         '- Site 194: Required for specificity',
         '**Processing:**',
-        '- Signal 1-15',
-        '- Propeptide 16-23 [PRO_0000028197]: Activation peptide',
-        '- Chain 24-247 [PRO_0000028198]: Serine protease 1',
-        '- Chain 24-122 [PRO_0000313570]: Alpha-trypsin chain 1',
-        '- Chain 123-247 [PRO_0000313571]: Alpha-trypsin chain 2',
+        '- Signal 1..15',
+        '- Propeptide 16..23 [PRO_0000028197]: Activation peptide',
+        '- Chain 24..247 [PRO_0000028198]: Serine protease 1',
+        '- Chain 24..122 [PRO_0000313570]: Alpha-trypsin chain 1',
+        '- Chain 123..247 [PRO_0000313571]: Alpha-trypsin chain 2',
         '**Comments:**',
+        `- COFACTOR: ${COFACTOR_NOTE}`,
         '- SUBUNIT: Interacts with SERPINA1 (PubMed:11057674)',
         `- PTM: ${PTM_CLEAVAGE}`,
         `- PTM: ${PTM_SULFATION} (PubMed:25010489)`,
@@ -2454,7 +4154,7 @@ describe('getEntry #35 sections (real service over captured rows, through runToo
         '- Binding site 88: proximal binding residue — heme b (CHEBI:60344); part Fe (CHEBI:18248)',
         '- Binding site 65 — substrate',
         '**EC numbers:** 2.6.1.1, 2.6.1.7',
-        '- Transit peptide 1-29: Mitochondrion',
+        '- Transit peptide 1..29: Mitochondrion',
         '- Binding site 47 — Zn(2+) (CHEBI:29105) label 1, catalytic',
         '- Binding site 98 — Zn(2+) (CHEBI:29105) label 2',
       ]),
@@ -2517,16 +4217,16 @@ describe('getEntry #35 sections (real service over captured rows, through runToo
     expect(lines).toEqual(
       expect.arrayContaining([
         '**Processing:**',
-        '- Signal 1-24',
-        '- Peptide 25-54 [PRO_0000015819]: Insulin B chain',
-        '- Propeptide 57-87 [PRO_0000015820]: C peptide',
-        '- Peptide 90-110 [PRO_0000015821]: Insulin A chain',
+        '- Signal 1..24',
+        '- Peptide 25..54 [PRO_0000015819]: Insulin B chain',
+        '- Propeptide 57..87 [PRO_0000015820]: C peptide',
+        '- Peptide 90..110 [PRO_0000015821]: Insulin A chain',
         '- Initiator methionine 1: Removed',
         '**Topology:**',
-        '- Topological domain 25-645: Extracellular',
-        '- Transmembrane 646-668: Helical',
-        '- Topological domain 669-1210: Cytoplasmic',
-        '- Intramembrane 69-82',
+        '- Topological domain 25..645: Extracellular',
+        '- Transmembrane 646..668: Helical',
+        '- Topological domain 669..1210: Cytoplasmic',
+        '- Intramembrane 69..82',
       ]),
     );
     const count = (prefix: string) => lines.filter((line) => line.startsWith(prefix)).length;
@@ -2779,15 +4479,15 @@ describe('getEntry #35 sections (real service over captured rows, through runToo
       'topology',
       'P00533',
       3,
-      '- Topological domain 25-645: Extracellular',
-      '- Transmembrane 646-668: Helical',
+      '- Topological domain 25..645: Extracellular',
+      '- Transmembrane 646..668: Helical',
     ],
     [
       'processing',
       'P01308',
       4,
-      '- Signal 1-24',
-      '- Peptide 25-54 [PRO_0000015819]: Insulin B chain',
+      '- Signal 1..24',
+      '- Peptide 25..54 [PRO_0000015819]: Insulin B chain',
     ],
     [
       'mutagenesis',
@@ -2799,9 +4499,9 @@ describe('getEntry #35 sections (real service over captured rows, through runToo
     [
       'comments',
       'P07477',
-      3,
+      4,
+      `- COFACTOR: ${COFACTOR_NOTE}`,
       '- SUBUNIT: Interacts with SERPINA1 (PubMed:11057674)',
-      `- PTM: ${PTM_CLEAVAGE}`,
     ],
     [
       'interactions',
